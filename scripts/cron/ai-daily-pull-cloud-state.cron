@@ -1,0 +1,3 @@
+# Pull cloud feedback/features every night at 23:30.
+# Requires SSH key login for AI_DAILY_REMOTE=aliyun-ai.
+30 23 * * * cd /home/lsh/Documents/AI-daily-update && AI_DAILY_REMOTE=aliyun-ai /home/lsh/Documents/AI-daily-update/scripts/pull_cloud_state.sh >> /home/lsh/Documents/AI-daily-update/data/logs/pull-cloud-state.log 2>&1

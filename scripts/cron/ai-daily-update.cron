@@ -1,0 +1,2 @@
+# Run AI-Daily-Update every day at 08:30.
+30 8 * * * cd /home/lsh/Documents/AI-daily-update && /home/lsh/Documents/AI-daily-update/.venv/bin/ai-daily daily >> /home/lsh/Documents/AI-daily-update/data/logs/cron.log 2>&1

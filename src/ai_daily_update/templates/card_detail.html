@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not card %}
+<section class="panel">
+  <h1>未找到卡片</h1>
+  <p class="muted">这个卡片 ID 不存在。</p>
+</section>
+{% else %}
+<section class="toolbar">
+  <div>
+    <h1>{{ card.title }}</h1>
+    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ ", ".join(card.topics) }}</p>
+  </div>
+  <div class="actions">
+    {% if navigation.previous %}<a class="button-link" href="{{ navigation.previous.detail_url }}">上一条</a>{% endif %}
+    {% if navigation.next %}<a class="button-link" href="{{ navigation.next.detail_url }}">下一条</a>{% endif %}
+    <a class="button-link" href="/cards">返回列表</a>
+    {% if card.source_url %}<a class="button-link" href="{{ card.source_url }}">打开来源</a>{% endif %}
+  </div>
+</section>
+
+<section class="grid-two detail-grid" data-card-id="{{ card.id }}">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>卡片内容</h2>
+      <span class="status {{ card.status }}" data-card-status-label>{{ card.status_label }}</span>
+    </div>
+    <div class="report-rendered card-content">{{ content_html | safe }}</div>
+  </div>
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>审核操作</h2>
+    </div>
+    {% set status_return_to = "/cards/" ~ card.id %}
+    {% set status_actions_vertical = true %}
+    {% include "_card_status_actions.html" %}
+
+    <hr>
+
+    <div class="review-note">
+      <h2>日期修正</h2>
+      <div class="date-meta">
+        <div><span>事件日期</span><strong>{{ card.event_date or "未记录" }}</strong></div>
+        <div><span>信息日期</span><strong>{{ card.info_date or "未记录" }}</strong></div>
+        <div><span>入库日期</span><strong>{{ card.collected_date or "未记录" }}</strong></div>
+      </div>
+      <form class="date-edit-form detail" method="post" action="/actions/card-event-date">
+        <input type="hidden" name="card_id" value="{{ card.id }}">
+        <input type="hidden" name="return_to" value="/cards/{{ card.id }}">
+        <input type="date" name="event_date" value="{{ card.event_date }}">
+        <button type="submit">保存事件日期</button>
+      </form>
+      <p class="subtle">事件日期用于简报和 PPT 的“事件/发布日期”筛选；信息日期保留原始来源的发布或抓取口径。</p>
+    </div>
+
+    <hr>
+
+    <form method="post" action="/actions/card-review-note">
+      <input type="hidden" name="card_id" value="{{ card.id }}">
+      <button type="submit">生成单卡审核建议</button>
+    </form>
+
+    <div class="review-note">
+      <h2>审核建议</h2>
+      {% if review_note %}
+      <div class="report-rendered">{{ review_note.preview_html | safe }}</div>
+      {% else %}
+      <p class="muted">还没有单卡审核建议。</p>
+      {% endif %}
+    </div>
+
+    <div class="review-note">
+      <h2>PPT 使用情况</h2>
+      {% if ppt_usage %}
+      <div class="usage-list">
+        {% for usage in ppt_usage %}
+        <article class="usage-item">
+          <strong>{{ usage.title }}</strong>
+          <div class="subtle">{{ usage.deck_label }} · {{ usage.kind_label }}</div>
+          <div class="subtle">{{ usage.location }}</div>
+          <div class="subtle">{{ usage.report_name }}</div>
+          <span class="status {{ 'accepted' if usage.status in ['accepted', 'adopted'] else 'rejected' if usage.status == 'rejected' else 'later' }}">{{ usage.status_label }}</span>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">尚未关联到 PPT 更新建议。</p>
+      {% endif %}
+    </div>
+  </aside>
+</section>
+{% endif %}
+{% endblock %}

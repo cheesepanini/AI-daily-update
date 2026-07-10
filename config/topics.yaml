@@ -1,0 +1,147 @@
+tracks:
+  academic:
+    name_zh: 学术前沿
+    daily_quota: 3
+  industry:
+    name_zh: AI 产业观察
+    daily_quota: 2
+
+topics:
+  foundation-model:
+    name_zh: 预训练大模型
+    name_en: Foundation Models
+    track: [academic, industry]
+    priority: 5
+    aliases:
+      - large language model
+      - LLM
+      - foundation model
+      - pretrained model
+      - multimodal foundation model
+  self-supervised-learning:
+    name_zh: 自监督学习
+    name_en: Self-Supervised Learning
+    track: [academic]
+    priority: 4
+    aliases:
+      - self-supervised learning
+      - contrastive learning
+      - masked modeling
+      - representation learning
+  generative-model:
+    name_zh: 生成模型
+    name_en: Generative Models
+    track: [academic, industry]
+    priority: 5
+    aliases:
+      - diffusion model
+      - flow matching
+      - autoregressive model
+      - video generation
+      - image generation
+      - world model
+  intelligent-game:
+    name_zh: 智能博弈
+    name_en: Intelligent Game
+    track: [academic]
+    priority: 3
+    aliases:
+      - game AI
+      - multi-agent game
+      - strategic reasoning
+      - reinforcement learning game
+  spatial-intelligence:
+    name_zh: 空间智能
+    name_en: Spatial Intelligence
+    track: [academic, industry]
+    priority: 5
+    aliases:
+      - spatial reasoning
+      - 3D understanding
+      - embodied spatial intelligence
+      - world model
+      - scene understanding
+  agent:
+    name_zh: 智能体
+    name_en: AI Agents
+    track: [academic, industry]
+    priority: 5
+    aliases:
+      - AI agent
+      - autonomous agent
+      - tool use
+      - agent workflow
+      - multi-agent system
+      - computer use agent
+  ai4science:
+    name_zh: AI4S
+    name_en: AI for Science
+    track: [academic, industry]
+    priority: 4
+    aliases:
+      - AI for Science
+      - scientific foundation model
+      - protein model
+      - materials discovery
+      - drug discovery
+  ai-industry:
+    name_zh: AI 产业
+    name_en: AI Industry
+    track: [industry]
+    priority: 5
+    aliases:
+      - AI market
+      - AI company
+      - AI startup
+      - AI platform
+      - AI application
+  ai-compute:
+    name_zh: AI 算力
+    name_en: AI Compute
+    track: [industry]
+    priority: 4
+    aliases:
+      - AI chip
+      - GPU cluster
+      - training compute
+      - inference infrastructure
+      - datacenter
+  ai-policy:
+    name_zh: AI 政策
+    name_en: AI Policy
+    track: [industry]
+    priority: 4
+    aliases:
+      - AI regulation
+      - AI governance
+      - AI policy
+      - model safety regulation
+  benchmark-evaluation:
+    name_zh: 公开测评与榜单
+    name_en: Benchmark Evaluation
+    track: [academic, industry]
+    priority: 5
+    aliases:
+      - leaderboard
+      - benchmark
+      - evaluation
+      - arena
+      - chatbot arena
+      - lmarena
+      - artificial analysis
+      - HELM
+      - model ranking
+      - model leaderboard
+      - openrouter
+      - eval
+
+future_topics:
+  autonomous-driving:
+    name_zh: 自动驾驶
+    enabled: false
+  humanoid-robot:
+    name_zh: 人形机器人
+    enabled: false
+  uav:
+    name_zh: 智能无人机
+    enabled: false

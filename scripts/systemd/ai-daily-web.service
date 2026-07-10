@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Daily Update web service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lsh/AI-daily-update
+EnvironmentFile=/home/lsh/AI-daily-update/.env
+ExecStart=/home/lsh/AI-daily-update/.venv/bin/ai-daily serve --host 0.0.0.0 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

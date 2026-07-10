@@ -1,0 +1,32 @@
+{% extends "public_base.html" %}
+{% block content %}
+{% if not card %}
+<section class="panel">
+  <h1>未找到卡片</h1>
+  <p class="muted">这张卡片不存在，或当前不在公开展示范围内。</p>
+</section>
+{% else %}
+<section class="toolbar">
+  <div>
+    <h1>{{ card.title }}</h1>
+    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ card.status_label }}</p>
+  </div>
+  <div class="actions">
+    <a class="button-link" href="/public">返回列表</a>
+    {% if card.source_url %}<a class="button-link" href="{{ card.source_url }}">打开来源</a>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="public-detail-meta">
+    <div><span>事件日期</span><strong>{{ card.event_date or "未记录" }}</strong></div>
+    <div><span>信息日期</span><strong>{{ card.info_date or "未记录" }}</strong></div>
+    <div><span>入库日期</span><strong>{{ card.collected_date or "未记录" }}</strong></div>
+    <div><span>通道</span><strong>{{ card.track_label }}</strong></div>
+    <div><span>状态</span><strong>{{ card.status_label }}</strong></div>
+    {% if card.source_label %}<div><span>来源</span><strong>{{ card.source_label }}</strong></div>{% endif %}
+  </div>
+  <div class="report-rendered card-content">{{ content_html | safe }}</div>
+</section>
+{% endif %}
+{% endblock %}

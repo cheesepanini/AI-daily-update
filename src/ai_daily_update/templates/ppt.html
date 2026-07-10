@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>PPT 更新</h1>
+    <p class="muted">{{ deck.label }} · 基于已接受卡片、稳定结构节点和趋势关键词生成 PPT 更新建议。</p>
+  </div>
+  <div class="actions">
+    <form class="filters" method="get" action="/ppt">
+      <select name="deck_id" onchange="this.form.submit()">
+        {% for option in deck_options %}
+        <option value="{{ option.id }}" {% if option.id == deck.id %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="button-link" href="/">返回工作台</a>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>生成 PPT 更新建议</h2>
+    <span class="muted">输出到 notes/inbox</span>
+  </div>
+  <form class="brief-form" method="post" action="/actions/ppt-plan" data-ppt-plan-form data-today="{{ today }}" data-week-start="{{ week_start }}" data-week-end="{{ week_end }}">
+    <input type="hidden" name="deck_id" value="{{ deck.id }}">
+    <label>
+      <span>时间范围</span>
+      <select name="preset" data-preset>
+        <option value="today">本日建议</option>
+        <option value="this_week">本周建议</option>
+        <option value="custom">自定义时间段</option>
+      </select>
+    </label>
+    <label data-date-field>
+      <span>开始日期</span>
+      <input type="date" name="from_date" value="{{ today }}" data-from-date>
+    </label>
+    <label data-date-field>
+      <span>结束日期</span>
+      <input type="date" name="to_date" value="{{ today }}" data-to-date>
+    </label>
+    <label>
+      <span>日期口径</span>
+      <select name="date_basis">
+        <option value="collected">收集/入库日期</option>
+        <option value="event">事件/发布日期</option>
+      </select>
+    </label>
+    <label>
+      <span>卡片状态</span>
+      <select name="status">
+        <option value="accepted">已接受</option>
+        <option value="needs-review">待审核</option>
+        <option value="later">稍后处理</option>
+      </select>
+    </label>
+    <button class="primary" type="submit">生成建议</button>
+  </form>
+  <p class="subtle">本周范围按当前时区计算：{{ week_start }} 至 {{ week_end }}。默认只使用已接受卡片。</p>
+</section>
+
+<section class="panel job-panel" id="ppt-job-panel" hidden>
+  <div class="panel-head">
+    <h2>生成进度</h2>
+    <span class="status" id="ppt-job-status"></span>
+  </div>
+  <p><strong id="ppt-job-label"></strong></p>
+  <p class="muted" id="ppt-job-step"></p>
+  <ul class="job-logs" id="ppt-job-logs"></ul>
+</section>
+
+<script>
+  (() => {
+    const form = document.querySelector("[data-ppt-plan-form]");
+    if (!form) return;
+    const preset = form.querySelector("[data-preset]");
+    const fromDate = form.querySelector("[data-from-date]");
+    const toDate = form.querySelector("[data-to-date]");
+    const dateFields = form.querySelectorAll("[data-date-field]");
+
+    function syncDateFields() {
+      const locked = preset.value !== "custom";
+      if (preset.value === "today") {
+        fromDate.value = form.dataset.today;
+        toDate.value = form.dataset.today;
+      } else if (preset.value === "this_week") {
+        fromDate.value = form.dataset.weekStart;
+        toDate.value = form.dataset.weekEnd;
+      }
+      fromDate.disabled = locked;
+      toDate.disabled = locked;
+      dateFields.forEach((field) => field.classList.toggle("is-disabled", locked));
+    }
+
+    preset.addEventListener("change", syncDateFields);
+    syncDateFields();
+
+    const panel = document.getElementById("ppt-job-panel");
+    const status = document.getElementById("ppt-job-status");
+    const label = document.getElementById("ppt-job-label");
+    const step = document.getElementById("ppt-job-step");
+    const logs = document.getElementById("ppt-job-logs");
+    let startedPptJob = false;
+
+    function renderJob(job) {
+      if (!job || !job.id) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      status.textContent = job.status || "";
+      label.textContent = job.label || "";
+      step.textContent = job.step || "";
+      logs.innerHTML = "";
+      for (const log of job.logs || []) {
+        const item = document.createElement("li");
+        item.textContent = log;
+        logs.appendChild(item);
+      }
+    }
+
+    async function refreshPptJob(jobId) {
+      const response = await fetch(`/jobs/${jobId}`);
+      const job = await response.json();
+      renderJob(job);
+      if (job.status === "running" || job.status === "queued") {
+        setTimeout(() => refreshPptJob(jobId), 2000);
+      } else if (startedPptJob && job.status === "complete") {
+        startedPptJob = false;
+        window.location.reload();
+      } else {
+        setTimeout(refreshLatestPptJob, 15000);
+      }
+    }
+
+    async function refreshLatestPptJob() {
+      const response = await fetch("/jobs/latest?job_type=ppt-plan");
+      const job = await response.json();
+      if (!job.id) {
+        panel.hidden = true;
+        setTimeout(refreshLatestPptJob, 15000);
+        return;
+      }
+      renderJob(job);
+      if (job.status === "running" || job.status === "queued") {
+        setTimeout(() => refreshPptJob(job.id), 2000);
+      } else {
+        setTimeout(refreshLatestPptJob, 15000);
+      }
+    }
+
+    refreshLatestPptJob();
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type='submit']");
+      button.disabled = true;
+      const data = new FormData(form);
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: data,
+        headers: {"X-Requested-With": "fetch"}
+      });
+      const payload = await response.json();
+      startedPptJob = true;
+      renderJob(payload.job);
+      setTimeout(() => refreshPptJob(payload.job_id), 1000);
+      button.disabled = false;
+    });
+  })();
+</script>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>PPT 建议审核</h2>
+    <span class="muted">待处理 {{ ppt_review_stats.pending }} / 已采纳 {{ ppt_review_stats.accepted }} / 已写入 {{ ppt_review_stats.adopted }} / 暂不更新 {{ ppt_review_stats.rejected }}</span>
+  </div>
+  {% if ppt_review_items %}
+  <div class="brief-list">
+    {% for item in ppt_review_items %}
+    <article class="review-card">
+      <div class="review-card-main">
+        <div class="review-card-title">
+          <strong>{{ item.display_title or item.title }}</strong>
+          <span class="status {{ 'accepted' if item.status in ['accepted', 'adopted'] else 'rejected' if item.status == 'rejected' else 'later' }}">{{ item.status_label }}</span>
+        </div>
+        <div class="subtle ppt-suggestion-meta">
+          {{ item.subtitle or item.kind_label }}{% if item.generated_at %} · 生成于 {{ item.generated_at }}{% endif %}
+        </div>
+        {% if item.edits %}
+        <div class="ppt-edit-list">
+          {% for edit in item.edits %}
+          <div class="ppt-edit">
+            <div class="ppt-edit-aside">
+              <div>
+                <span>位置</span>
+                <strong>{{ "第 " ~ edit.page ~ " 页" if edit.page else "对应页面" }}</strong>
+              </div>
+              <div>
+                <span>任务</span>
+                <strong>{{ edit.type_label or "修改建议" }}</strong>
+              </div>
+            </div>
+            <div class="ppt-edit-body">
+              {% if edit.instruction %}
+              <div class="ppt-edit-instruction">
+                <span>操作说明</span>
+                <p>{{ edit.instruction }}</p>
+              </div>
+              {% endif %}
+              {% if item.target_locations and item.target_locations | length > 1 %}
+              <div class="ppt-target-list">
+                <span>适用位置</span>
+                <div>
+                  {% for target in item.target_locations %}
+                  <span class="ppt-target">
+                    {{ target.pages | join(", ") if target.pages else "未匹配页码" }} · {{ target.location or target.title }}
+                  </span>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+              {% if edit.current_text %}
+              <div class="ppt-edit-block current">
+                <span>当前表述</span>
+                <p>{{ edit.current_text }}</p>
+              </div>
+              {% endif %}
+              <div class="ppt-edit-block suggested">
+                <span>{{ "建议改为" if edit.current_text else "建议讲稿" }}</span>
+                <p>{{ edit.suggested_text }}</p>
+              </div>
+              {% if edit.rationale %}
+              <div class="ppt-edit-reason">
+                <span>依据</span>
+                <p>{{ edit.rationale }}</p>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="suggestion-line">{{ item.recommendation or item.excerpt }}</p>
+        {% endif %}
+        <div class="evidence-summary">{{ item.evidence_summary }}</div>
+        {% if item.cards %}
+        <details class="details-block">
+          <summary>查看证据卡片</summary>
+          <div class="evidence-list">
+            {% for evidence in item.cards %}
+            <article class="evidence-card">
+              <div>
+                <strong>{{ evidence.title }}</strong>
+                <div class="subtle">{{ evidence.date }} · {{ evidence.source_label }}</div>
+                <p>{{ evidence.conclusion or evidence.overview }}</p>
+              </div>
+              <div class="review-actions vertical">
+                <span class="status {{ evidence.status }}">{{ evidence.status_label }}</span>
+                <a class="button-link" href="{{ evidence.detail_url }}">查看卡片</a>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
+      <div class="review-actions vertical">
+        <form method="post" action="/actions/ppt-suggestion-review">
+          <input type="hidden" name="deck_id" value="{{ deck.id }}">
+          <input type="hidden" name="return_to" value="/ppt?deck_id={{ deck.id }}">
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <input type="hidden" name="status" value="accepted">
+          <button type="submit">采纳建议</button>
+        </form>
+        <form method="post" action="/actions/ppt-suggestion-review">
+          <input type="hidden" name="deck_id" value="{{ deck.id }}">
+          <input type="hidden" name="return_to" value="/ppt?deck_id={{ deck.id }}">
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <input type="hidden" name="status" value="adopted">
+          <button type="submit">标记已写入 PPT</button>
+        </form>
+        <form method="post" action="/actions/ppt-suggestion-review">
+          <input type="hidden" name="deck_id" value="{{ deck.id }}">
+          <input type="hidden" name="return_to" value="/ppt?deck_id={{ deck.id }}">
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <input type="hidden" name="status" value="rejected">
+          <button type="submit">暂不更新</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">暂无可审核的 PPT 更新建议。生成一份建议后会出现在这里。</p>
+  {% endif %}
+</section>
+
+<section class="panel" id="ppt-manuscript">
+  <div class="panel-head">
+    <h2>PPT 讲稿更新</h2>
+    <span class="muted">{{ manuscript.line_count }} 行</span>
+  </div>
+  <div class="manuscript-console">
+    <div class="manuscript-meta">
+      <div>
+        <span>当前报告</span>
+        <strong>{{ deck.label }}</strong>
+      </div>
+      <div>
+        <span>讲稿文件</span>
+        <code>{{ manuscript.path }}</code>
+      </div>
+      <div>
+        <span>自动导入区</span>
+        <strong>{{ "已存在" if manuscript.has_import_block else "未写入" }}</strong>
+      </div>
+    </div>
+    <div class="manuscript-command">
+      <form method="post" action="/actions/ppt-manuscript-import">
+        <input type="hidden" name="deck_id" value="{{ deck.id }}">
+        <button class="primary" type="submit">导入已采纳建议</button>
+      </form>
+      <p class="muted">
+    {% if manuscript.has_import_block %}
+        已包含自动导入区块，可展开讲稿继续编辑后保存。
+    {% else %}
+        导入会写入当前讲稿末尾的系统管理区块，并自动备份原稿。
+    {% endif %}
+      </p>
+    </div>
+  </div>
+  {% if manuscript.exists %}
+  <details class="manuscript-editor">
+    <summary>按标题层级编辑讲稿（{{ manuscript.section_count }} 个小节）</summary>
+    {% if manuscript.section_count %}
+    <form class="manuscript-form" method="post" action="/actions/ppt-manuscript-sections-save">
+      <input type="hidden" name="deck_id" value="{{ deck.id }}">
+      <div class="manuscript-section-editor">
+        <nav class="manuscript-section-nav" aria-label="讲稿小节">
+          {% for level1 in manuscript.outline %}
+          <div class="manuscript-nav-level1">
+            <strong>{{ level1.title }}</strong>
+            {% for level2 in level1.children %}
+            <div class="manuscript-nav-level2">
+              <span>{{ level2.title }}</span>
+              {% for section in level2.sections %}
+              <a href="#{{ section.anchor }}">
+                <small>{{ section.page or "未标页" }}</small>
+                {{ section.title or "（无三级标题）" }}
+              </a>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </nav>
+        <div class="manuscript-section-list">
+          {% set ns = namespace(level1="", level2="") %}
+          {% for chunk in manuscript.chunks %}
+          {% if chunk.kind == "section" %}
+          {% if chunk.level1 != ns.level1 %}
+          <div class="manuscript-level-heading level1">
+            <span>一级标题</span>
+            <strong>{{ chunk.level1 or "未归入一级标题" }}</strong>
+          </div>
+          {% set ns.level1 = chunk.level1 %}
+          {% set ns.level2 = "" %}
+          {% endif %}
+          {% if chunk.level2 != ns.level2 %}
+          <div class="manuscript-level-heading level2">
+            <span>二级标题</span>
+            <strong>{{ chunk.level2 or "未归入二级标题" }}</strong>
+          </div>
+          {% set ns.level2 = chunk.level2 %}
+          {% endif %}
+          <section class="manuscript-section-item" id="{{ chunk.anchor }}">
+            <div class="manuscript-section-head">
+              <div>
+                <strong>{{ chunk.title or "空" }}</strong>
+                <span>三级标题</span>
+              </div>
+              <span class="status accepted">{{ "第 " ~ chunk.page ~ " 页" if chunk.page else "未标页码" }}</span>
+            </div>
+            <textarea name="chunk_content" spellcheck="false">{{ chunk.content }}</textarea>
+          </section>
+          {% else %}
+          <textarea name="chunk_content" hidden>{{ chunk.content }}</textarea>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit">保存分段讲稿</button>
+        <span class="muted">保存前会自动备份到 ppt/backups。</span>
+      </div>
+    </form>
+    {% else %}
+    <p class="muted">当前讲稿还没有识别到三级标题，可使用全文源码编辑。</p>
+    {% endif %}
+  </details>
+  <details class="manuscript-editor raw">
+    <summary>全文源码编辑</summary>
+    <form class="manuscript-form raw" method="post" action="/actions/ppt-manuscript-save">
+      <input type="hidden" name="deck_id" value="{{ deck.id }}">
+      <textarea name="content" spellcheck="false">{{ manuscript.content }}</textarea>
+      <div class="actions">
+        <button type="submit">保存讲稿</button>
+        <span class="muted">保存前会自动备份到 ppt/backups。</span>
+      </div>
+    </form>
+  </details>
+  {% else %}
+  <p class="muted">未找到当前 PPT 讲稿文件。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>PPT 报告管理</h2>
+    <a class="button-link" href="/ppt/template">下载讲稿模板</a>
+  </div>
+  <form class="deck-upload-form" method="post" action="/actions/ppt-deck-upload" enctype="multipart/form-data">
+    <label>
+      <span>PPT 标题</span>
+      <input type="text" name="title" placeholder="例如：人工智能发展前沿" required>
+    </label>
+    <label>
+      <span>版本</span>
+      <input type="text" name="version" placeholder="例如：60分钟版">
+    </label>
+    <label>
+      <span>时长</span>
+      <input type="text" name="duration" placeholder="例如：60">
+    </label>
+    <label>
+      <span>Deck ID</span>
+      <input type="text" name="deck_id" placeholder="例如：ai-frontier-60min" required>
+    </label>
+    <label class="wide">
+      <span>上传讲稿 Markdown</span>
+      <input type="file" name="manuscript_file" accept=".md,.markdown,text/markdown,text/plain">
+    </label>
+    <label class="full">
+      <span>或粘贴结构化讲稿</span>
+      <textarea name="manuscript_text" spellcheck="false" placeholder="可粘贴按照模板整理的 Markdown 讲稿。上传文件时此处可留空。"></textarea>
+    </label>
+    <button class="primary" type="submit">创建 PPT 报告</button>
+  </form>
+  <p class="subtle">创建后会写入 ppt/decks.yaml，并在 ppt/decks/{deck_id}/ 下生成 manuscript.md、structured.csv 和 nodes.yaml。</p>
+</section>
+
+<details class="panel collapsible-panel">
+  <summary class="collapsible-summary">
+    <span class="summary-title">结构节点</span>
+    {% if node_overview.available %}
+    <span class="muted">已匹配 {{ node_overview["matched"] }} / {{ node_overview["total"] }}</span>
+    {% endif %}
+  </summary>
+  <div class="collapsible-body">
+{% if not node_overview["available"] %}
+  <p class="muted">{{ node_overview["message"] }}</p>
+{% elif node_overview["items"] %}
+  <div class="table-wrap">
+    <table class="responsive-table node-table">
+      <thead>
+        <tr>
+          <th>节点</th>
+          <th>当前位置</th>
+          <th>页码</th>
+          <th>匹配</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in node_overview["items"] %}
+        <tr>
+          <td data-label="节点">
+            <strong>{{ item["node_id"] }}</strong>
+            <div class="subtle">{{ item["intent"] }}</div>
+          </td>
+          <td data-label="当前位置">{{ item["location"] }}</td>
+          <td data-label="页码">{{ item["pages"] | join(", ") if item["pages"] else "未匹配" }}</td>
+          <td data-label="匹配">
+            <span class="status {{ 'accepted' if item['matched'] else 'rejected' }}">{{ "已匹配" if item['matched'] else "未匹配" }}</span>
+            <div class="subtle">score {{ item["score"] }}</div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">暂无结构节点。</p>
+  {% endif %}
+  </div>
+</details>
+
+<details class="panel collapsible-panel">
+  <summary class="collapsible-summary">
+    <span class="summary-title">最近 PPT 更新建议</span>
+    <span class="muted">{{ plans | length }} 份</span>
+  </summary>
+  <div class="collapsible-body">
+  {% if plans %}
+  <div class="brief-list">
+    {% for plan in plans %}
+    <article class="brief-item">
+      <div class="brief-meta">
+        <strong>{{ plan.name }}</strong>
+        <code>{{ plan.path }}</code>
+      </div>
+      <div class="report-rendered">{{ plan.preview_html | safe }}</div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">还没有生成 PPT 更新建议。</p>
+  {% endif %}
+  </div>
+</details>
+
+{% endblock %}

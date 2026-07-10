@@ -1,0 +1,47 @@
+{% if queue_cards %}
+<div class="table-wrap">
+  <table class="responsive-table review-table">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>标题</th>
+        <th>通道</th>
+        <th>状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for card in queue_cards %}
+      <tr data-card-id="{{ card.id }}">
+        <td data-label="日期">
+          <div>事件日期：{{ card.event_date }}</div>
+          {% if card.info_date and card.info_date != card.event_date %}
+          <div class="subtle">信息日期：{{ card.info_date }}</div>
+          {% endif %}
+          <div class="subtle">入库日期：{{ card.collected_date or "未记录" }}</div>
+          <form class="date-edit-form" method="post" action="/actions/card-event-date">
+            <input type="hidden" name="card_id" value="{{ card.id }}">
+            <input type="hidden" name="return_to" value="{{ return_to | default('/') }}">
+            <input type="date" name="event_date" value="{{ card.event_date }}">
+            <button type="submit">修正</button>
+          </form>
+        </td>
+        <td data-label="标题">
+          <a href="{{ card.detail_url }}">{{ card.title }}</a>
+          <div class="subtle">{{ card.event_overview }}</div>
+          {% if card.source_url %}<div class="subtle"><a href="{{ card.source_url }}">原始来源：{{ card.source_label }}</a></div>{% endif %}
+        </td>
+        <td data-label="通道">{{ card.track_label }}</td>
+        <td data-label="状态"><span class="status {{ card.status }}" data-card-status-label>{{ card.status_label }}</span></td>
+        <td data-label="操作">
+          {% set status_return_to = return_to | default("/") %}
+          {% include "_card_status_actions.html" %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">当前没有需要处理的卡片。</p>
+{% endif %}

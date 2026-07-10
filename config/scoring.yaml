@@ -1,0 +1,20 @@
+weights:
+  importance: 0.35
+  novelty: 0.25
+  confidence: 0.15
+  topic_priority: 0.25
+
+candidate_scoring:
+  source_weights:
+    manual: 30
+    arxiv: 16
+    company_blog: 12
+    rss: 10
+    benchmark: 14
+    chinese_media: 11
+
+  topic_priority_multiplier: 10
+
+  bonuses:
+    summary: 4
+    published: 2

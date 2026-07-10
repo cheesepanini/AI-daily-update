@@ -1,0 +1,49 @@
+project_name: AI-Daily-Update
+language: zh
+timezone: Asia/Shanghai
+
+daily:
+  max_cards: 20
+  academic_quota: 12
+  industry_quota: 8
+  media_quota: 5
+  candidate_limit: 150
+  shortlist_limit: 40
+  schedule:
+    enabled: true
+    times:
+      - "08:00"
+      - "18:00"
+
+storage:
+  markdown_root: notes
+  sqlite_path: data/kb.sqlite
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL}
+  api_key_env: OPENAI_API_KEY
+  base_url: ${OPENAI_BASE_URL}
+
+ppt:
+  llm_polish: true
+
+auth:
+  enabled: true
+  username: ${AI_DAILY_ADMIN_USERNAME}
+  password: ${AI_DAILY_ADMIN_PASSWORD}
+  session_secret: ${AI_DAILY_SESSION_SECRET}
+  session_hours: 24
+
+review:
+  statuses:
+    - needs-review
+    - accepted
+    - later
+    - rejected
+  auto:
+    enabled: true
+    stale_after_days: 1
+    accept_threshold: 28
+    reject_threshold: 22
+    uncertain_status: rejected

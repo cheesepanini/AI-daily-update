@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>每日工作台</h1>
+    <p class="muted">本地知识库流水线状态、候选池和卡片预览。</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/actions/index">
+      <button type="submit">重建索引</button>
+    </form>
+    <form class="daily-action-form" method="post" action="/actions/daily">
+      <input type="hidden" name="dry_run" value="true">
+      <button type="submit">预跑候选</button>
+    </form>
+    <a class="button-link" href="/sources">消息源管理</a>
+    <a class="button-link" href="/trends">趋势提示</a>
+    <form class="daily-action-form" method="post" action="/actions/daily">
+      <input type="hidden" name="dry_run" value="false">
+      <button class="primary" type="submit">生成今日卡片</button>
+    </form>
+  </div>
+</section>
+
+<section class="stats-grid">
+  <div class="stat"><span>卡片总数</span><strong>{{ stats.total }}</strong></div>
+  <div class="stat"><span>待审核</span><strong>{{ stats["needs-review"] }}</strong></div>
+  <div class="stat"><span>已接受</span><strong>{{ stats.accepted }}</strong></div>
+  <div class="stat"><span>稍后处理</span><strong>{{ stats.later }}</strong></div>
+  <div class="stat"><span>学术前沿</span><strong>{{ stats.academic }}</strong></div>
+  <div class="stat"><span>产业观察</span><strong>{{ stats.industry }}</strong></div>
+</section>
+
+{% if warnings %}
+<section class="band warning">
+  <h2>索引警告</h2>
+  <ul>
+    {% for warning in warnings %}
+    <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="panel job-panel" id="job-panel" {% if not latest_job %}hidden{% endif %}>
+  <div class="panel-head">
+    <h2>整理进度</h2>
+    <span class="status" id="job-status">{{ latest_job.status if latest_job else "" }}</span>
+  </div>
+  <p><strong id="job-label">{{ latest_job.label if latest_job else "" }}</strong></p>
+  <p class="muted" id="job-step">{{ latest_job.step if latest_job else "" }}</p>
+  <ul class="job-logs" id="job-logs">
+    {% if latest_job %}
+    {% for log in latest_job.logs %}
+    <li>{{ log }}</li>
+    {% endfor %}
+    {% endif %}
+  </ul>
+</section>
+
+<section class="stack">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>审核队列</h2>
+      <a href="/cards">查看全部</a>
+    </div>
+    {% set queue_cards = cards %}
+    {% include "_review_queue_table.html" %}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>来自媒体</h2>
+      <a href="/cards">查看全部</a>
+    </div>
+    <p class="subtle">二手信源、自媒体和中文媒体来源，建议重点核对原始出处。</p>
+    {% set queue_cards = media_cards %}
+    {% include "_review_queue_table.html" %}
+  </div>
+
+  <details class="panel collapsible-panel">
+    <summary class="collapsible-summary">
+      <span class="summary-title">最新候选报告</span>
+      {% if candidate_report %}<span class="muted">{{ candidate_report.name }}</span>{% endif %}
+    </summary>
+    <div class="collapsible-body">
+    {% if candidate_report %}
+    <div class="report-rendered">{{ candidate_report.preview_html | safe }}</div>
+    {% else %}
+    <p class="muted">还没有候选报告。</p>
+    {% endif %}
+    </div>
+  </details>
+</section>
+
+<script>
+  let startedDailyJob = false;
+  async function refreshJobStatus() {
+    const response = await fetch("/jobs/latest?job_type=daily");
+    const job = await response.json();
+    const panel = document.getElementById("job-panel");
+    if (!job.id) {
+      panel.hidden = true;
+      setTimeout(refreshJobStatus, 15000);
+      return;
+    }
+    panel.hidden = false;
+    document.getElementById("job-status").textContent = job.status || "";
+    document.getElementById("job-label").textContent = job.label || "";
+    document.getElementById("job-step").textContent = job.step || "";
+    const logs = document.getElementById("job-logs");
+    logs.innerHTML = "";
+    for (const log of job.logs || []) {
+      const item = document.createElement("li");
+      item.textContent = log;
+      logs.appendChild(item);
+    }
+    if (job.status === "running" || job.status === "queued") {
+      setTimeout(refreshJobStatus, 2000);
+    } else if (startedDailyJob && job.status === "complete") {
+      startedDailyJob = false;
+      window.location.reload();
+    } else {
+      setTimeout(refreshJobStatus, 15000);
+    }
+  }
+  function renderJob(job) {
+    const panel = document.getElementById("job-panel");
+    if (!job || !job.id) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    document.getElementById("job-status").textContent = job.status || "";
+    document.getElementById("job-label").textContent = job.label || "";
+    document.getElementById("job-step").textContent = job.step || "";
+    const logs = document.getElementById("job-logs");
+    logs.innerHTML = "";
+    for (const log of job.logs || []) {
+      const item = document.createElement("li");
+      item.textContent = log;
+      logs.appendChild(item);
+    }
+  }
+  refreshJobStatus();
+  for (const form of document.querySelectorAll(".daily-action-form")) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button");
+      button.disabled = true;
+      const data = new FormData(form);
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: data,
+        headers: {"X-Requested-With": "fetch"}
+      });
+      const payload = await response.json();
+      startedDailyJob = true;
+      renderJob(payload.job);
+      setTimeout(refreshJobStatus, 1000);
+      button.disabled = false;
+    });
+  }
+</script>
+{% endblock %}

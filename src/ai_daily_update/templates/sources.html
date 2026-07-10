@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>消息源管理</h1>
+    <p class="muted">当前配置的 RSS、网页和论文源。可按主题、源名称、URL、通道或关键词筛选。</p>
+  </div>
+  <form class="filters" method="get" action="/sources">
+    <input type="search" name="q" value="{{ q }}" placeholder="智能体 / 基础模型 / 自监督训练 / 空间智能">
+    <select name="theme" onchange="this.form.submit()">
+      <option value="">全部主题</option>
+      {% for option in theme_options %}
+      <option value="{{ option.id }}" {% if theme == option.id %}selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">搜索</button>
+    {% if q or theme %}<a class="button-link" href="/sources">清空</a>{% endif %}
+  </form>
+</section>
+
+<section class="panel compact-panel">
+  <div class="panel-head">
+    <h2>新增 Topic</h2>
+    <span class="muted">用于消息源主/副 topic 归类</span>
+  </div>
+  <form class="source-topic-create" method="post" action="/actions/source-topic-options">
+    <input type="hidden" name="return_to" value="{{ current_url }}">
+    <input type="text" name="label" placeholder="例如：具身智能" required>
+    <input type="text" name="topic_id" placeholder="可选 ID，例如 embodied-ai">
+    <button type="submit">新增 Topic</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>建议新增消息源</h2>
+    {% if source_suggestions %}
+    <code>{{ source_suggestions.path }}</code>
+    {% endif %}
+  </div>
+  {% if source_suggestion_items %}
+  <div class="table-wrap">
+    <table class="responsive-table source-suggestion-table">
+      <thead>
+        <tr>
+          <th>候选源</th>
+          <th>Topic</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in source_suggestion_items %}
+        <tr data-source-suggestion-id="{{ source.id }}">
+          <td data-label="候选源">
+            <strong>{{ source.name }}</strong>
+            <div class="subtle">{{ source.priority }} · <a href="{{ source.url }}" target="_blank" rel="noreferrer">{{ source.url }}</a></div>
+            <div class="subtle">来源：{{ "自动建议" if source.proposal_origin != "manual" else "手工建议" }}</div>
+            <div class="subtle">{{ source.reason }}</div>
+          </td>
+          <td data-label="Topic">{{ source.topic_text }}</td>
+          <td data-label="状态">
+            <span class="status {{ source.status_class }}" data-source-suggestion-status-label>{{ source.status_label }}</span>
+          </td>
+          <td data-label="操作">
+            {% set source_return_to = current_url %}
+            {% include "_source_suggestion_actions.html" %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">暂无基于 PPT 的消息源建议。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>消息源</h2>
+    <span class="muted">{{ sources | length }} / {{ total }}</span>
+  </div>
+  {% if sources %}
+  <div class="source-list">
+    {% for source in sources %}
+    <article class="source-item">
+      <div class="source-main">
+        <div class="source-title">
+          <strong>{{ source.name }}</strong>
+          <span class="status {{ 'accepted' if source.enabled else 'rejected' }}">{{ "启用" if source.enabled else "停用" }}</span>
+        </div>
+        <div class="subtle">{{ source.kind }} · {{ source.track_label }} · {{ " / ".join(source.theme_labels) }}</div>
+        <div class="subtle"><a href="{{ source.url }}">{{ source.url }}</a></div>
+      </div>
+      <div class="source-tags">
+        {% for theme_label in source.theme_labels %}
+        <span>{{ theme_label }}</span>
+        {% endfor %}
+        {% for keyword in source.keywords[:10] %}
+        <span>{{ keyword }}</span>
+        {% endfor %}
+      </div>
+      <form class="inline-form" method="post" action="/actions/source-enabled">
+        <input type="hidden" name="source_key" value="{{ source.source_key }}">
+        <input type="hidden" name="return_to" value="{{ current_url }}">
+        <input type="hidden" name="enabled" value="{{ 'false' if source.enabled else 'true' }}">
+        <button class="compact-button" type="submit">{{ "停用消息源" if source.enabled else "重新启用" }}</button>
+      </form>
+      <form class="source-theme-form" method="post" action="/actions/source-themes">
+        <input type="hidden" name="source_key" value="{{ source.source_key }}">
+        <input type="hidden" name="return_to" value="{{ current_url }}">
+        <div class="source-theme-options">
+          <label class="topic-select">
+            <span>主 topic</span>
+            <select name="primary_topic">
+              {% for option in editable_theme_options %}
+              <option value="{{ option.id }}" {% if option.id == source.primary_topic %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="topic-select">
+            <span>副 topic</span>
+            <select name="secondary_topic">
+              <option value="">无</option>
+              {% for option in editable_theme_options %}
+              <option value="{{ option.id }}" {% if option.id == source.secondary_topic %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <button class="compact-button" type="submit">保存</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">没有匹配的消息源。</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>知识卡片</h1>
+    <p class="muted">Markdown 知识卡片索引视图。</p>
+  </div>
+  <div class="actions">
+  <form class="filters" method="get" action="/cards">
+    <input type="hidden" name="page" value="1">
+    <select name="status" onchange="this.form.submit()">
+      <option value="">全部状态</option>
+      {% for value in ["needs-review", "accepted", "later", "rejected"] %}
+      <option value="{{ value }}" {% if status == value %}selected{% endif %}>
+        {% if value == "needs-review" %}待审核{% elif value == "accepted" %}已接受{% elif value == "later" %}稍后处理{% else %}已拒绝{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <select name="track" onchange="this.form.submit()">
+      <option value="">全部通道</option>
+      {% for value in ["academic", "industry"] %}
+      <option value="{{ value }}" {% if track == value %}selected{% endif %}>
+        {% if value == "academic" %}学术前沿{% else %}产业观察{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+  <a class="button-link" href="/trash">回收站</a>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="pagination-bar">
+    <div class="muted">
+      {% if pagination.total %}
+      显示第 {{ pagination.start }}-{{ pagination.end }} 条，共 {{ pagination.total }} 条
+      {% else %}
+      暂无卡片
+      {% endif %}
+    </div>
+    <div class="pagination-actions">
+      {% if pagination.has_previous %}
+      <a class="button-link" href="{{ page_url(pagination.previous_page) }}">上一页</a>
+      {% else %}
+      <span class="button-link disabled">上一页</span>
+      {% endif %}
+      <span class="muted">第 {{ pagination.page }} / {{ pagination.total_pages }} 页</span>
+      {% if pagination.has_next %}
+      <a class="button-link" href="{{ page_url(pagination.next_page) }}">下一页</a>
+      {% else %}
+      <span class="button-link disabled">下一页</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="responsive-table card-table">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>标题</th>
+          <th>主题</th>
+          <th>通道</th>
+          <th>状态</th>
+          <th>审核</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for card in cards %}
+        <tr data-card-id="{{ card.id }}">
+          <td data-label="日期">
+            <div>事件日期：{{ card.event_date }}</div>
+            {% if card.info_date and card.info_date != card.event_date %}
+            <div class="subtle">信息日期：{{ card.info_date }}</div>
+            {% endif %}
+            <div class="subtle">入库日期：{{ card.collected_date or "未记录" }}</div>
+            <form class="date-edit-form" method="post" action="/actions/card-event-date">
+              <input type="hidden" name="card_id" value="{{ card.id }}">
+              <input type="hidden" name="return_to" value="{{ current_url }}">
+              <input type="date" name="event_date" value="{{ card.event_date }}">
+              <button type="submit">修正</button>
+            </form>
+          </td>
+          <td data-label="标题">
+            <a href="{{ card.detail_url }}">{{ card.title }}</a>
+            <div class="subtle">{{ card.title_en }}</div>
+            {% if card.conclusion %}<div class="subtle">{{ card.conclusion }}</div>{% endif %}
+            {% if card.source_url %}<div class="subtle"><a href="{{ card.source_url }}">原始来源：{{ card.source_label }}</a></div>{% endif %}
+          </td>
+          <td data-label="主题">{{ ", ".join(card.topics) }}</td>
+          <td data-label="通道">{{ card.track_label }}</td>
+          <td data-label="状态"><span class="status {{ card.status }}" data-card-status-label>{{ card.status_label }}</span></td>
+          <td data-label="审核">
+            {% set status_return_to = current_url %}
+            {% include "_card_status_actions.html" %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination-bar bottom">
+    <div class="muted">每页 20 条</div>
+    <div class="pagination-actions">
+      {% if pagination.has_previous %}
+      <a class="button-link" href="{{ page_url(pagination.previous_page) }}">上一页</a>
+      {% endif %}
+      {% if pagination.has_next %}
+      <a class="button-link" href="{{ page_url(pagination.next_page) }}">下一页</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

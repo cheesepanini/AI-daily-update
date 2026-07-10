@@ -1,0 +1,20 @@
+<div class="review-actions vertical" data-source-suggestion-actions>
+  {% if source.status != "added" %}
+  <form method="post" action="/actions/source-suggestion-add">
+    <input type="hidden" name="return_to" value="{{ source_return_to }}">
+    <input type="hidden" name="suggestion_id" value="{{ source.id }}">
+    <button type="submit">加入消息源</button>
+  </form>
+  {% endif %}
+  {% if source.status not in ["rejected", "added"] %}
+  <form method="post" action="/actions/source-suggestion-review">
+    <input type="hidden" name="return_to" value="{{ source_return_to }}">
+    <input type="hidden" name="suggestion_id" value="{{ source.id }}">
+    <input type="hidden" name="status" value="rejected">
+    <button type="submit">不加入</button>
+  </form>
+  {% endif %}
+  {% if source.status == "added" %}
+  <span class="muted">已加入消息源</span>
+  {% endif %}
+</div>

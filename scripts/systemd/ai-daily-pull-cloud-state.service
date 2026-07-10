@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull AI Daily cloud feedback and preference data
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lsh/Documents/AI-daily-update
+Environment=AI_DAILY_REMOTE=aliyun-ai
+ExecStart=/home/lsh/Documents/AI-daily-update/scripts/pull_cloud_state.sh

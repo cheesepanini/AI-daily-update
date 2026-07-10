@@ -1,0 +1,2 @@
+card_generation: |
+  You are helping build a Chinese AI knowledge base. Generate a concise Markdown card draft from the supplied source metadata and excerpts. Do not invent facts beyond the source.

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>简报生成</h1>
+    <p class="muted">从已接受卡片生成本日、本周或指定时间段的 Markdown 简报。</p>
+  </div>
+  <a class="button-link" href="/">返回工作台</a>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>生成新简报</h2>
+    <span class="muted">只使用 review_status 为 accepted 的卡片</span>
+  </div>
+  <form class="brief-form" method="post" action="/actions/brief">
+    <label>
+      <span>时间范围</span>
+      <select name="preset">
+        <option value="today">本日简报</option>
+        <option value="this_week">本周简报</option>
+        <option value="custom">自定义时间段</option>
+      </select>
+    </label>
+    <label>
+      <span>开始日期</span>
+      <input type="date" name="from_date" value="{{ today }}">
+    </label>
+    <label>
+      <span>结束日期</span>
+      <input type="date" name="to_date" value="{{ today }}">
+    </label>
+    <label>
+      <span>简报类型</span>
+      <select name="audience">
+        <option value="academic">学术前沿</option>
+        <option value="industry">产业观察</option>
+        <option value="book">图书素材</option>
+        <option value="public">公众简报</option>
+      </select>
+    </label>
+    <label>
+      <span>日期口径</span>
+      <select name="date_basis">
+        <option value="collected">收集/入库日期</option>
+        <option value="event">事件/发布日期</option>
+      </select>
+    </label>
+    <label class="wide">
+      <span>Topic 过滤</span>
+      <input type="text" name="topics" placeholder="可选，多个 topic 用英文逗号分隔">
+    </label>
+    <button class="primary" type="submit">生成简报</button>
+  </form>
+  <p class="subtle">本周范围按当前时区计算：{{ week_start }} 至 {{ week_end }}。默认按收集/入库日期生成工作日简报，也可切换为事件/发布日期。</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>最近简报</h2>
+  </div>
+  {% if briefs %}
+  <div class="brief-list">
+    {% for brief in briefs %}
+    <article class="brief-item">
+      <div class="brief-meta">
+        <strong>{{ brief.name }}</strong>
+        <code>{{ brief.path }}</code>
+      </div>
+      <div class="report-rendered">{{ brief.preview_html | safe }}</div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">还没有生成简报。</p>
+  {% endif %}
+</section>
+{% endblock %}

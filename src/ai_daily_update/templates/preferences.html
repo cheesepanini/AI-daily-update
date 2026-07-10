@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>偏好学习</h1>
+    <p class="muted">记录人工反馈，抽取可供后续 SVM/线性模型使用的特征。当前模型尚未参与决策。</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/actions/extract-features">
+      <input type="hidden" name="surface" value="all">
+      <button class="primary" type="submit">生成/刷新特征</button>
+    </form>
+  </div>
+</section>
+
+<section class="stats-grid">
+  <div class="stat"><span>反馈事件</span><strong>{{ status.feedback_count }}</strong></div>
+  <div class="stat"><span>特征版本</span><strong>{{ status.feature_version }}</strong></div>
+  <div class="stat"><span>模型状态</span><strong>{{ status.model_status }}</strong></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>训练数据状态</h2>
+    <span class="muted">{{ status.model_note }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>场景</th>
+          <th>特征记录</th>
+          <th>最近更新</th>
+          <th>文件</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for surface in status.surfaces %}
+        <tr>
+          <td>{{ surface.label }}</td>
+          <td>{{ surface.count }}</td>
+          <td>{{ surface.updated_at or "未生成" }}</td>
+          <td><code>{{ surface.path }}</code></td>
+          <td>
+            <form method="post" action="/actions/extract-features">
+              <input type="hidden" name="surface" value="{{ surface.id }}">
+              <button type="submit">刷新</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>反馈日志</h2>
+    <span class="muted">{{ "已建立" if status.feedback_exists else "尚未建立" }}</span>
+  </div>
+  <p><code>{{ status.feedback_path }}</code></p>
+  <p class="subtle">后续训练 SVM 时，会把这里的人工/自动决策作为标签，把上方特征文件作为输入。</p>
+</section>
+{% endblock %}

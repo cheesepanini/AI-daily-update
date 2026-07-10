@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.log
+.DS_Store
+.coverage
+htmlcov/
+
+.env
+
+# Runtime state and generated assets: synced separately via
+# scripts/deploy_cloud.sh and scripts/pull_cloud_state.sh, not through git.
+data/
+notes/
+ppt/
+config/sources.yaml

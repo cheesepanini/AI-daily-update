@@ -1,0 +1,27 @@
+{% set status_actions = [
+  {"value": "accepted", "label": "接受"},
+  {"value": "needs-review", "label": "待审"},
+  {"value": "later", "label": "稍后"},
+  {"value": "rejected", "label": "拒绝"}
+] %}
+<div class="review-actions{% if status_actions_vertical %} vertical{% endif %}" data-card-status-actions>
+  {% for action in status_actions %}
+  {% if card.status != action.value %}
+  <form method="post" action="/actions/review">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <input type="hidden" name="status" value="{{ action.value }}">
+    <input type="hidden" name="return_to" value="{{ status_return_to }}">
+    <input type="hidden" name="status_actions_vertical" value="{{ 'true' if status_actions_vertical else 'false' }}">
+    <button type="submit">{{ action.label }}</button>
+  </form>
+  {% endif %}
+  {% endfor %}
+  {% if card.status == "accepted" %}
+  <form method="post" action="/actions/delete-card" onsubmit="return confirm('确认删除这张已接受卡片？文件会移入 notes/trash，可手动恢复。')">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <input type="hidden" name="return_to" value="{{ status_return_to }}">
+    <input type="hidden" name="status_actions_vertical" value="{{ 'true' if status_actions_vertical else 'false' }}">
+    <button type="submit">删除</button>
+  </form>
+  {% endif %}
+</div>

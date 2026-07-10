@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>回收站</h1>
+    <p class="muted">已删除卡片记录。删除是软删除，文件保存在 notes/trash。</p>
+  </div>
+  <a class="button-link" href="/cards">返回卡片</a>
+</section>
+
+<section class="panel">
+  {% if cards %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>信息日期</th>
+          <th>删除时间</th>
+          <th>标题</th>
+          <th>主题</th>
+          <th>通道</th>
+          <th>文件</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for card in cards %}
+        <tr>
+          <td>{{ card.date }}</td>
+          <td>{{ card.deleted_at or "未记录" }}</td>
+          <td>
+            <strong>{{ card.title }}</strong>
+            <div class="subtle">{{ card.event_overview }}</div>
+            {% if card.source_url %}<div class="subtle"><a href="{{ card.source_url }}">原始来源：{{ card.source_label }}</a></div>{% endif %}
+          </td>
+          <td>{{ ", ".join(card.topics) }}</td>
+          <td>{{ card.track_label }}</td>
+          <td><code>{{ card.path }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">回收站暂无卡片。</p>
+  {% endif %}
+</section>
+{% endblock %}

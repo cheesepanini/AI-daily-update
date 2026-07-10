@@ -1,0 +1,73 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>知识卡片</h1>
+    <p class="muted">按事件日期排列，包含已接受、待审核和稍后处理的卡片。待审核内容仅供参考。</p>
+  </div>
+  <div class="pagination-actions">
+    {% if pagination.has_previous %}
+    <a class="button-link" href="{{ page_url(pagination.previous_page) }}">上一页</a>
+    {% endif %}
+    {% if pagination.has_next %}
+    <a class="button-link" href="{{ page_url(pagination.next_page) }}">下一页</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="pagination-bar">
+    <div class="muted">
+      {% if pagination.total %}
+      显示第 {{ pagination.start }}-{{ pagination.end }} 条，共 {{ pagination.total }} 条
+      {% else %}
+      暂无卡片
+      {% endif %}
+    </div>
+    <div class="muted">第 {{ pagination.page }} / {{ pagination.total_pages }} 页</div>
+  </div>
+
+  {% if cards %}
+  <div class="public-card-list">
+    {% for card in cards %}
+    <article class="public-card">
+      <div class="public-card-date">
+        <span>事件日期</span>
+        <strong>{{ card.event_date }}</strong>
+        {% if card.info_date and card.info_date != card.event_date %}
+        <small>信息日期 {{ card.info_date }}</small>
+        {% endif %}
+      </div>
+      <div class="public-card-main">
+        <div class="public-card-title">
+          <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
+          <span class="status {{ card.status }}">{{ card.status_label }}</span>
+        </div>
+        {% if card.conclusion %}<p class="public-card-conclusion">{{ card.conclusion }}</p>{% endif %}
+        {% if card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
+        <div class="subtle">
+          {{ card.track_label }}
+          {% if card.source_label %} · 原始来源：{{ card.source_label }}{% endif %}
+          {% if card.topics %} · {{ ", ".join(card.topics) }}{% endif %}
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">暂无可展示的卡片。</p>
+  {% endif %}
+
+  <div class="pagination-bar bottom">
+    <div class="muted">每页 20 条</div>
+    <div class="pagination-actions">
+      {% if pagination.has_previous %}
+      <a class="button-link" href="{{ page_url(pagination.previous_page) }}">上一页</a>
+      {% endif %}
+      {% if pagination.has_next %}
+      <a class="button-link" href="{{ page_url(pagination.next_page) }}">下一页</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

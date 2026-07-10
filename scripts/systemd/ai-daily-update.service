@@ -1,0 +1,7 @@
+[Unit]
+Description=AI-Daily-Update daily pipeline
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lsh/Documents/AI-daily-update
+ExecStart=/home/lsh/Documents/AI-daily-update/.venv/bin/ai-daily daily
