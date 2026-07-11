@@ -7,7 +7,13 @@ from ai_daily_update.ppt.corpus import (
     read_ppt_node_registry,
 )
 from ai_daily_update.ppt.plan import generate_ppt_plan, summarize_level2_trends
-from ai_daily_update.ppt.plan import merge_ppt_items_by_evidence
+from ai_daily_update.ppt.plan import (
+    attach_auxiliary_evidence,
+    build_ppt_update_groups_by_importance,
+    group_core_cards_by_semantics_with_llm,
+    score_card_importance_with_llm,
+    select_core_cards,
+)
 from ai_daily_update.ppt.plan import build_oral_update_text, PPTCardSuggestion
 from ai_daily_update.storage.markdown import write_card
 
@@ -225,88 +231,213 @@ nodes:
     assert first_item["recommendation"] == "这里可以补充 Gemini Robotics，说明多模态模型正在进入具身智能场景。"
 
 
-def test_merge_ppt_items_by_same_evidence_group() -> None:
-    items = [
-        {
-            "suggestion_id": "section",
-            "kind": "section_trend",
-            "kind_label": "小节趋势建议",
-            "title": "智能体",
-            "location": "二、理论前沿 / 智能体",
-            "pages": [21],
-            "card_ids": ["card-a", "card-b"],
-            "recommendation": "建议补充智能体案例。",
-            "edits": [{"instruction": "在第 21 页补充。", "suggested_text": "建议文本。"}],
-        },
-        {
-            "suggestion_id": "node",
-            "kind": "node_update",
-            "kind_label": "结构节点建议",
-            "title": "auto.node",
-            "location": "二、理论前沿 / 智能体 / 安全评估",
-            "pages": [22],
-            "card_ids": ["card-b", "card-a"],
-            "recommendation": "建议补充智能体案例。",
-            "edits": [{"instruction": "在第 22 页补充。", "suggested_text": "建议文本。"}],
-        },
+def make_card_suggestion(card_id: str, node_id: str, topics: list[str], score: int = 0, title: str = "") -> PPTCardSuggestion:
+    return PPTCardSuggestion(
+        card_id=card_id,
+        title=title or card_id,
+        source_url="https://example.com",
+        date="2026-07-07",
+        topics=topics,
+        conclusion=f"{card_id} 的一句话结论。",
+        overview=f"{card_id} 的事件概述。",
+        node_id=node_id,
+        node_label=node_id,
+        score=score,
+        reasons=[],
+    )
+
+
+def test_select_core_cards_splits_by_importance_score() -> None:
+    card_ids = [f"card-{i}" for i in range(20)]
+    importance = {card_id: (5 if i < 12 else 2) for i, card_id in enumerate(card_ids)}
+
+    core, auxiliary = select_core_cards(card_ids, importance, min_count=10, max_count=15)
+
+    assert len(core) == 12
+    assert set(core) == {card_id for card_id in card_ids if importance[card_id] == 5}
+    assert set(auxiliary) == {card_id for card_id in card_ids if importance[card_id] == 2}
+
+
+def test_select_core_cards_keeps_all_when_fewer_than_minimum() -> None:
+    card_ids = ["a", "b", "c"]
+    importance = {"a": 5, "b": 3, "c": 1}
+
+    core, auxiliary = select_core_cards(card_ids, importance, min_count=10, max_count=15)
+
+    assert core == ["a", "b", "c"]
+    assert auxiliary == []
+
+
+def test_score_card_importance_with_llm_uses_llm_scores() -> None:
+    class FakeLLM:
+        available = True
+
+        def generate_card_content(self, prompt: str) -> str:
+            return json.dumps(
+                {"scores": [{"card_id": "card-1", "score": 5}, {"card_id": "card-2", "score": 2}]}
+            )
+
+    card_lookup = {
+        "card-1": make_card_suggestion("card-1", "node.a", ["foundation-model"], score=10),
+        "card-2": make_card_suggestion("card-2", "node.b", ["agent"], score=5),
+    }
+
+    scores = score_card_importance_with_llm(["card-1", "card-2"], card_lookup, FakeLLM())
+
+    assert scores == {"card-1": 5, "card-2": 2}
+
+
+def test_score_card_importance_falls_back_to_match_score_without_llm() -> None:
+    card_lookup = {
+        "card-1": make_card_suggestion("card-1", "node.a", ["foundation-model"], score=10),
+        "card-2": make_card_suggestion("card-2", "node.b", ["agent"], score=5),
+    }
+
+    scores = score_card_importance_with_llm(["card-1", "card-2"], card_lookup, None)
+
+    assert scores == {"card-1": 10, "card-2": 5}
+
+
+def test_group_core_cards_by_semantics_with_llm_uses_llm_groups() -> None:
+    class FakeLLM:
+        available = True
+
+        def generate_card_content(self, prompt: str) -> str:
+            return json.dumps(
+                {
+                    "groups": [
+                        {"card_ids": ["card-1", "card-2"], "label": "多模态大模型"},
+                        {"card_ids": ["card-3"], "label": "智能体安全"},
+                    ]
+                }
+            )
+
+    card_lookup = {
+        "card-1": make_card_suggestion("card-1", "node.a", ["foundation-model"]),
+        "card-2": make_card_suggestion("card-2", "node.a", ["foundation-model"]),
+        "card-3": make_card_suggestion("card-3", "node.b", ["agent"]),
+    }
+
+    groups = group_core_cards_by_semantics_with_llm(
+        ["card-1", "card-2", "card-3"], card_lookup, [], FakeLLM()
+    )
+
+    assert len(groups) == 2
+    assert {"card-1", "card-2"} == set(groups[0]["card_ids"])
+    assert groups[0]["label"] == "多模态大模型"
+
+
+def test_group_core_cards_falls_back_to_structure_grouping_without_llm() -> None:
+    card_lookup = {
+        "card-1": make_card_suggestion("card-1", "node.a", ["foundation-model"]),
+        "card-2": make_card_suggestion("card-2", "node.a", ["foundation-model"]),
+        "card-3": make_card_suggestion("card-3", "node.b", ["agent"]),
+    }
+    scoped_items = [
+        {"kind": "node_update", "node_id": "node.a", "card_ids": ["card-1", "card-2"]},
+        {"kind": "node_update", "node_id": "node.b", "card_ids": ["card-3"]},
     ]
 
-    merged = merge_ppt_items_by_evidence(items, "report.md")
+    groups = group_core_cards_by_semantics_with_llm(
+        ["card-1", "card-2", "card-3"], card_lookup, scoped_items, None
+    )
 
-    assert len(merged) == 1
-    assert merged[0]["kind"] == "merged_update"
-    assert merged[0]["pages"] == [21, 22]
-    assert len(merged[0]["target_locations"]) == 2
-    assert "同一更新也匹配到" in merged[0]["edits"][0]["instruction"]
+    grouped_card_ids = sorted(tuple(sorted(group["card_ids"])) for group in groups)
+    assert grouped_card_ids == [("card-1", "card-2"), ("card-3",)]
 
 
-def test_merge_ppt_items_by_overlapping_evidence_group() -> None:
+def test_attach_auxiliary_evidence_attaches_by_keyword_overlap() -> None:
+    card_lookup = {
+        "core-1": make_card_suggestion("core-1", "node.a", ["foundation-model"]),
+        "core-2": make_card_suggestion("core-2", "node.b", ["agent"]),
+        "aux-1": make_card_suggestion("aux-1", "node.a", ["foundation-model"]),
+    }
+    groups = [{"card_ids": ["core-1"], "label": ""}, {"card_ids": ["core-2"], "label": ""}]
+
+    updated = attach_auxiliary_evidence(groups, ["aux-1"], card_lookup)
+
+    assert "aux-1" in updated[0]["card_ids"]
+    assert "aux-1" not in updated[1]["card_ids"]
+
+
+def test_build_ppt_update_groups_by_importance_merges_semantically_similar_items() -> None:
+    class FakeLLM:
+        available = True
+
+        def generate_card_content(self, prompt: str) -> str:
+            if "重要性分" in prompt:
+                return json.dumps(
+                    {
+                        "scores": [
+                            {"card_id": "card-a", "score": 5},
+                            {"card_id": "card-b", "score": 5},
+                            {"card_id": "card-c", "score": 4},
+                        ]
+                    }
+                )
+            return json.dumps(
+                {
+                    "groups": [
+                        {"card_ids": ["card-a", "card-b"], "label": "预训练大模型"},
+                        {"card_ids": ["card-c"], "label": "空间智能"},
+                    ]
+                }
+            )
+
+    suggestions = [
+        make_card_suggestion("card-a", "node.language", ["foundation-model"], score=8, title="语言模型进展"),
+        make_card_suggestion("card-b", "node.multimodal", ["foundation-model"], score=6, title="多模态模型进展"),
+        make_card_suggestion("card-c", "node.spatial", ["spatial-ai"], score=5, title="空间智能进展"),
+    ]
     items = [
         {
-            "suggestion_id": "section",
-            "kind": "section_trend",
-            "kind_label": "小节趋势建议",
-            "title": "预训练大模型",
-            "location": "二、理论前沿 / 预训练大模型",
-            "pages": [20],
-            "card_ids": ["fusion", "briefcase", "distributed-attack", "safety-monitor"],
-            "recommendation": "建议补充 Fusion 工具。",
-            "edits": [{"instruction": "在第 20 页补充。", "suggested_text": "建议文本。"}],
-        },
-        {
-            "suggestion_id": "language",
+            "suggestion_id": "node-language",
             "kind": "node_update",
             "kind_label": "结构节点建议",
-            "title": "语言大模型",
+            "title": "node.language",
+            "node_id": "node.language",
             "location": "二、理论前沿 / 预训练大模型 / 语言大模型",
             "pages": [21],
-            "card_ids": ["fusion", "briefcase"],
-            "recommendation": "OpenRouter Fusion 可作为语言模型案例。",
+            "card_ids": ["card-a"],
+            "cards": [{"card_id": "card-a", "title": "语言模型进展"}],
+            "recommendation": "语言模型建议。",
             "edits": [{"instruction": "在第 21 页补充。", "suggested_text": "建议文本。"}],
         },
         {
-            "suggestion_id": "other",
+            "suggestion_id": "node-multimodal",
             "kind": "node_update",
-            "title": "空间智能",
+            "kind_label": "结构节点建议",
+            "title": "node.multimodal",
+            "node_id": "node.multimodal",
+            "location": "二、理论前沿 / 预训练大模型 / 多模态大模型",
+            "pages": [22],
+            "card_ids": ["card-b"],
+            "cards": [{"card_id": "card-b", "title": "多模态模型进展"}],
+            "recommendation": "多模态建议。",
+            "edits": [{"instruction": "在第 22 页补充。", "suggested_text": "建议文本。"}],
+        },
+        {
+            "suggestion_id": "node-spatial",
+            "kind": "node_update",
+            "kind_label": "结构节点建议",
+            "title": "node.spatial",
+            "node_id": "node.spatial",
             "location": "三、技术前沿 / 空间智能",
             "pages": [40],
-            "card_ids": ["spatial-card"],
-            "recommendation": "另一个建议。",
-            "edits": [],
+            "card_ids": ["card-c"],
+            "cards": [{"card_id": "card-c", "title": "空间智能进展"}],
+            "recommendation": "空间智能建议。",
+            "edits": [{"instruction": "在第 40 页补充。", "suggested_text": "建议文本。"}],
         },
     ]
 
-    merged = merge_ppt_items_by_evidence(items, "report.md")
+    grouped = build_ppt_update_groups_by_importance(items, suggestions, "report.md", FakeLLM())
 
-    assert len(merged) == 2
-    merged_update = next(item for item in merged if item["kind"] == "merged_update")
-    assert merged_update["card_ids"] == [
-        "briefcase",
-        "distributed-attack",
-        "fusion",
-        "safety-monitor",
-    ]
-    assert len(merged_update["target_locations"]) == 2
+    assert len(grouped) == 2
+    merged_update = next(item for item in grouped if item["kind"] == "merged_update")
+    assert set(merged_update["card_ids"]) == {"card-a", "card-b"}
+    single_update = next(item for item in grouped if item["card_ids"] == ["card-c"])
+    assert single_update["kind"] == "node_update"
 
 
 def test_summarize_level2_trends_merges_keywords_by_section(tmp_path) -> None:

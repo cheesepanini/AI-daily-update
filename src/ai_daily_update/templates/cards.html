@@ -8,6 +8,7 @@
   <div class="actions">
   <form class="filters" method="get" action="/cards">
     <input type="hidden" name="page" value="1">
+    <input type="search" name="q" value="{{ q }}" placeholder="标题 / 结论关键词">
     <select name="status" onchange="this.form.submit()">
       <option value="">全部状态</option>
       {% for value in ["needs-review", "accepted", "later", "rejected"] %}
@@ -24,6 +25,14 @@
       </option>
       {% endfor %}
     </select>
+    <select name="topic" onchange="this.form.submit()">
+      <option value="">全部主题</option>
+      {% for option in topic_options %}
+      <option value="{{ option.id }}" {% if topic == option.id %}selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">搜索</button>
+    {% if q or topic %}<a class="button-link" href="{{ clear_url }}">清空</a>{% endif %}
   </form>
   <a class="button-link" href="/trash">回收站</a>
   </div>

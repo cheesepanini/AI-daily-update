@@ -11,7 +11,7 @@ htmlcov/
 
 # Runtime state and generated assets: synced separately via
 # scripts/deploy_cloud.sh and scripts/pull_cloud_state.sh, not through git.
-data/
-notes/
-ppt/
+/data/
+/notes/
+/ppt/
 config/sources.yaml

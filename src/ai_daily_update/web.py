@@ -41,7 +41,7 @@ from ai_daily_update.preference.features import (
     read_feature_records,
 )
 from ai_daily_update.ppt.decks import PPTDeck, deck_options, selected_ppt_deck
-from ai_daily_update.ppt.plan import generate_ppt_plan, load_ppt_node_matches, merge_ppt_items_by_evidence
+from ai_daily_update.ppt.plan import generate_ppt_plan, load_ppt_node_matches
 from ai_daily_update.reports.brief import extract_sections, generate_brief
 from ai_daily_update.source_proposals import read_source_proposals
 from ai_daily_update.storage import db
@@ -329,8 +329,8 @@ def create_app(root: Path | None = None) -> FastAPI:
         )
 
     @app.get("/public", response_class=HTMLResponse)
-    def public_cards_view(request: Request, page: int = 1) -> HTMLResponse:
-        return public_cards_response(request, settings, page=page)
+    def public_cards_view(request: Request, page: int = 1, topic: str = "", q: str = "") -> HTMLResponse:
+        return public_cards_response(request, settings, page=page, topic=topic, q=q)
 
     @app.get("/public/cards/{card_id}", response_class=HTMLResponse)
     def public_card_detail(request: Request, card_id: str) -> HTMLResponse:
@@ -440,11 +440,13 @@ def create_app(root: Path | None = None) -> FastAPI:
         request: Request,
         status: str = "",
         track: str = "",
+        topic: str = "",
+        q: str = "",
         page: int = 1,
     ) -> HTMLResponse:
-        items = all_cards(settings, status=status, track=track)
+        items = all_cards(settings, status=status, track=track, topic=topic, q=q)
         paginated = paginate_items(items, page=page, page_size=20)
-        current_url = cards_page_url(status, track, paginated["page"])
+        current_url = cards_page_url(status, track, topic, q, paginated["page"])
         return templates.TemplateResponse(
             request,
             "cards.html",
@@ -453,9 +455,13 @@ def create_app(root: Path | None = None) -> FastAPI:
                 "cards": paginated["items"],
                 "status": status,
                 "track": track,
+                "topic": topic,
+                "q": q,
+                "topic_options": topic_options(settings.topics),
                 "pagination": paginated,
                 "current_url": current_url,
-                "page_url": lambda target_page: cards_page_url(status, track, target_page),
+                "page_url": lambda target_page: cards_page_url(status, track, topic, q, target_page),
+                "clear_url": cards_page_url("", "", "", "", 1),
             },
         )
 
@@ -1158,8 +1164,11 @@ def sort_dashboard_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def all_cards(settings: Settings, status: str = "", track: str = "") -> list[dict[str, Any]]:
+def all_cards(
+    settings: Settings, status: str = "", track: str = "", topic: str = "", q: str = ""
+) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
+    normalized_q = q.strip().lower()
     for path in iter_cards(settings.markdown_root):
         card = read_card(path)
         metadata = card.metadata
@@ -1167,7 +1176,12 @@ def all_cards(settings: Settings, status: str = "", track: str = "") -> list[dic
             continue
         if track and metadata.get("track") != track:
             continue
-        cards.append(card_list_item(path, card.metadata, card.content))
+        item = card_list_item(path, card.metadata, card.content)
+        if topic and topic not in set(item.get("topics", []) or []):
+            continue
+        if normalized_q and normalized_q not in item.get("search_text", ""):
+            continue
+        cards.append(item)
     return sorted(
         cards,
         key=lambda item: (
@@ -1200,24 +1214,38 @@ def paginate_items(items: list[Any], page: int = 1, page_size: int = 20) -> dict
     }
 
 
-def cards_page_url(status: str, track: str, page: int) -> str:
+def cards_page_url(status: str, track: str, topic: str, q: str, page: int) -> str:
     params = {}
     if status:
         params["status"] = status
     if track:
         params["track"] = track
+    if topic:
+        params["topic"] = topic
+    if q:
+        params["q"] = q
     if page > 1:
         params["page"] = str(page)
     query = urlencode(params)
     return f"/cards?{query}" if query else "/cards"
 
 
-def public_page_url(page: int) -> str:
-    return f"/public?page={page}" if page > 1 else "/public"
+def public_page_url(topic: str, q: str, page: int) -> str:
+    params = {}
+    if topic:
+        params["topic"] = topic
+    if q:
+        params["q"] = q
+    if page > 1:
+        params["page"] = str(page)
+    query = urlencode(params)
+    return f"/public?{query}" if query else "/public"
 
 
-def public_cards_response(request: Request, settings: Settings, page: int = 1) -> HTMLResponse:
-    items = public_cards(settings)
+def public_cards_response(
+    request: Request, settings: Settings, page: int = 1, topic: str = "", q: str = ""
+) -> HTMLResponse:
+    items = filter_public_cards(public_cards(settings), topic=topic, q=q)
     paginated = paginate_items(items, page=page, page_size=20)
     return templates.TemplateResponse(
         request,
@@ -1226,7 +1254,11 @@ def public_cards_response(request: Request, settings: Settings, page: int = 1) -
             "request": request,
             "cards": paginated["items"],
             "pagination": paginated,
-            "page_url": public_page_url,
+            "page_url": lambda target_page: public_page_url(topic, q, target_page),
+            "topic": topic,
+            "q": q,
+            "topic_options": topic_options(settings.topics),
+            "clear_url": public_page_url("", "", 1),
             "is_admin": auth_session_valid(request, settings),
         },
     )
@@ -1252,6 +1284,7 @@ def filter_public_cards(
     status: str = "",
     track: str = "",
     topic: str = "",
+    q: str = "",
     from_date: str = "",
     to_date: str = "",
 ) -> list[dict[str, Any]]:
@@ -1266,6 +1299,7 @@ def filter_public_cards(
         end = ""
     if start and end and end < start:
         start, end = end, start
+    normalized_q = q.strip().lower()
     filtered = cards
     if status:
         filtered = [card for card in filtered if card.get("status") == status]
@@ -1273,11 +1307,25 @@ def filter_public_cards(
         filtered = [card for card in filtered if card.get("track") == track]
     if topic:
         filtered = [card for card in filtered if topic in set(card.get("topics", []) or [])]
+    if normalized_q:
+        filtered = [card for card in filtered if normalized_q in card.get("search_text", "")]
     if start:
         filtered = [card for card in filtered if str(card.get("event_date", "")) >= start]
     if end:
         filtered = [card for card in filtered if str(card.get("event_date", "")) <= end]
     return filtered
+
+
+def topic_options(topics_config: dict[str, Any]) -> list[dict[str, str]]:
+    topics = topics_config.get("topics", {})
+    ranked = sorted(
+        topics.items(),
+        key=lambda item: (-int(item[1].get("priority", 0) or 0), item[1].get("name_zh") or item[0]),
+    )
+    return [
+        {"id": topic_id, "label": topic.get("name_zh") or topic.get("name_en") or topic_id}
+        for topic_id, topic in ranked
+    ]
 
 
 def display_event_date(metadata: dict[str, Any]) -> str:
@@ -1297,13 +1345,28 @@ def normalize_iso_date(value: str) -> str | None:
 def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[str, Any]:
     info_date = str(metadata.get("date", ""))
     event_date = display_event_date(metadata)
+    conclusion = extract_one_sentence_conclusion(content)
+    event_overview = extract_event_overview(content) or metadata.get("title_en", "")
+    search_text = " ".join(
+        filter(
+            None,
+            [
+                metadata.get("title_zh", ""),
+                metadata.get("title_en", ""),
+                conclusion or "",
+                event_overview or "",
+                " ".join(metadata.get("topics", []) or []),
+            ],
+        )
+    ).lower()
     return {
         "path": path,
         "id": metadata.get("id", path.stem),
         "title": metadata.get("title_zh") or metadata.get("title_en") or path.stem,
         "title_en": metadata.get("title_en", ""),
-        "conclusion": extract_one_sentence_conclusion(content),
-        "event_overview": extract_event_overview(content) or metadata.get("title_en", ""),
+        "conclusion": conclusion,
+        "event_overview": event_overview,
+        "search_text": search_text,
         "track": metadata.get("track", ""),
         "track_label": TRACK_LABELS.get(metadata.get("track", ""), metadata.get("track", "")),
         "source_type": metadata.get("source_type", ""),
@@ -1785,8 +1848,7 @@ def parse_ppt_plan_json_items(settings: Settings, deck: PPTDeck, path: Path) -> 
     card_lookup = cards_by_id(settings)
     generated_at = format_file_mtime(path, settings.timezone)
     items = []
-    raw_items = merge_ppt_items_by_evidence(payload.get("items", []), payload.get("report_name", path.name))
-    for raw in raw_items:
+    for raw in payload.get("items", []):
         cards = [
             enrich_ppt_evidence_card(card_lookup, card)
             for card in raw.get("cards", [])
