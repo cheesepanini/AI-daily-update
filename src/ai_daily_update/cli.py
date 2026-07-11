@@ -38,6 +38,8 @@ from ai_daily_update.processors.dedupe import dedupe_by_url, normalize_url_for_d
 from ai_daily_update.processors.digest import expand_digest_candidate, should_split_digest
 from ai_daily_update.processors.metadata import infer_title_zh
 from ai_daily_update.processors.score import score_candidate, select_top_candidates
+from ai_daily_update.utils.config import list_section, section
+from ai_daily_update.utils.lock import LockBusyError, exclusive_file_lock
 from ai_daily_update.processors.score import select_top_media_candidates
 from ai_daily_update.ppt.corpus import (
     group_ppt_topic_nodes,
@@ -263,7 +265,7 @@ def ppt_plan(
     deck = selected_ppt_deck(settings.root, deck_id)
     ppt_csv = ppt_csv or deck.csv_path
     node_registry = node_registry or deck.node_registry_path
-    llm_client = _llm_client(settings) if settings.app.get("ppt", {}).get("llm_polish", False) else None
+    llm_client = _llm_client(settings) if section(settings.app, "ppt").get("llm_polish", False) else None
     output_path = generate_ppt_plan(
         settings.markdown_root,
         ppt_csv,
@@ -299,10 +301,36 @@ def daily(
     """Run the V0.1 daily pipeline."""
     settings = _settings()
     run_day = date.fromisoformat(day) if day else today_in_timezone(settings.timezone)
-    run_daily_pipeline(settings, run_day, manual_only=manual_only, dry_run=dry_run)
+    try:
+        run_daily_pipeline(settings, run_day, manual_only=manual_only, dry_run=dry_run)
+    except LockBusyError:
+        typer.echo(
+            "Another daily run is already in progress for this project (lock: data/.daily.lock). "
+            "Skipping this run to avoid concurrent writes.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
 
 def run_daily_pipeline(
+    settings: Settings,
+    run_day: date,
+    manual_only: bool = False,
+    dry_run: bool = False,
+    progress: ProgressCallback | None = None,
+) -> None:
+    lock_path = settings.root / "data" / ".daily.lock"
+    with exclusive_file_lock(lock_path):
+        _run_daily_pipeline_locked(
+            settings,
+            run_day,
+            manual_only=manual_only,
+            dry_run=dry_run,
+            progress=progress,
+        )
+
+
+def _run_daily_pipeline_locked(
     settings: Settings,
     run_day: date,
     manual_only: bool = False,
@@ -352,7 +380,7 @@ def run_daily_pipeline(
         )
         for candidate in candidates
     ]
-    daily_config = settings.app.get("daily", {})
+    daily_config = section(settings.app, "daily")
     primary_candidates = [
         candidate for candidate in scored_candidates if candidate.source_kind != "chinese_media"
     ]
@@ -484,7 +512,7 @@ def auto_review(
     decisions = auto_review_stale_cards(
         settings.markdown_root,
         settings.topics,
-        settings.app.get("review", {}),
+        section(settings.app, "review"),
         run_day,
         settings.timezone,
         dry_run=dry_run,
@@ -530,7 +558,7 @@ def extract_features(
 
 
 def run_auto_review_if_enabled(settings: Settings, run_day: date, dry_run: bool = False):
-    review_config = settings.app.get("review", {})
+    review_config = section(settings.app, "review")
     auto_config = review_config.get("auto", {})
     if not bool(auto_config.get("enabled", True)):
         return []
@@ -643,11 +671,11 @@ def collect_daily_candidates(
     progress: ProgressCallback | None = None,
 ) -> tuple[list[Candidate], list[str]]:
     warnings: list[str] = []
-    daily_config = settings.app.get("daily", {})
+    daily_config = section(settings.app, "daily")
     candidate_limit = int(daily_config.get("candidate_limit", 50))
-    arxiv_config = settings.sources.get("sources", {}).get("arxiv", {})
-    rss_config = settings.sources.get("sources", {}).get("rss", {})
-    company_config = settings.sources.get("sources", {}).get("company_blogs", {})
+    arxiv_config = section(section(settings.sources, "sources"), "arxiv")
+    rss_config = section(section(settings.sources, "sources"), "rss")
+    company_config = section(section(settings.sources, "sources"), "company_blogs")
     source_steps = ["手工链接"]
     if not manual_only:
         if arxiv_config.get("enabled", False):
@@ -827,7 +855,7 @@ def arxiv_latest(
     """Fetch latest arXiv papers by submitted date."""
     settings = _settings()
     configured_categories = (
-        settings.sources.get("sources", {}).get("arxiv", {}).get("categories", [])
+        list_section(section(section(settings.sources, "sources"), "arxiv"), "categories")
     )
     category_list = (
         [item.strip() for item in categories.split(",") if item.strip()]

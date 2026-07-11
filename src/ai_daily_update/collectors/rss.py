@@ -6,6 +6,7 @@ import feedparser
 import requests
 
 from ai_daily_update.collectors.document import normalize_text
+from ai_daily_update.utils.config import list_section, section
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class RSSItem:
 
 
 def feeds_from_settings(settings: dict) -> list[RSSFeedConfig]:
-    feed_configs = settings.get("sources", {}).get("rss", {}).get("feeds", [])
+    feed_configs = list_section(section(section(settings, "sources"), "rss"), "feeds")
     return [
         RSSFeedConfig(
             name=item.get("name", item.get("url", "RSS Feed")),
@@ -47,11 +48,16 @@ def fetch_rss_feed(feed: RSSFeedConfig, timeout: int = 20) -> list[RSSItem]:
         headers={"User-Agent": "AI-Daily-Update/0.1 (local knowledge base)"},
     )
     response.raise_for_status()
-    return parse_rss_feed(response.text, feed)
+    # Pass raw bytes rather than response.text: feedparser sniffs the
+    # encoding from the XML declaration/BOM itself, which is more reliable
+    # than requests' header-based guess (which defaults to ISO-8859-1 for
+    # any text/* response with no explicit charset param, mangling non-ASCII
+    # feeds served as UTF-8/GBK/etc. without that param).
+    return parse_rss_feed(response.content, feed)
 
 
-def parse_rss_feed(xml_text: str, feed: RSSFeedConfig) -> list[RSSItem]:
-    parsed = feedparser.parse(xml_text)
+def parse_rss_feed(xml_source: str | bytes, feed: RSSFeedConfig) -> list[RSSItem]:
+    parsed = feedparser.parse(xml_source)
     items: list[RSSItem] = []
     for entry in parsed.entries:
         url = entry.get("link", "")

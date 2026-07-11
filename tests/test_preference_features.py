@@ -2,9 +2,44 @@ from fastapi.testclient import TestClient
 
 from ai_daily_update.config import load_settings
 from ai_daily_update.feedback.events import append_feedback_event
-from ai_daily_update.preference.features import extract_preference_features, read_feature_records
+from ai_daily_update.preference.features import (
+    extract_preference_features,
+    read_feature_records,
+    safe_int,
+)
 from ai_daily_update.storage.markdown import write_card
 from ai_daily_update.web import create_app
+
+
+def test_safe_int_handles_infinity_without_crashing() -> None:
+    assert safe_int(float("inf")) == 0
+    assert safe_int(float("-inf")) == 0
+    assert safe_int(float("nan")) == 0
+
+
+def test_extract_preference_features_handles_infinite_score_field(tmp_path) -> None:
+    write_test_config(tmp_path)
+    write_card(
+        tmp_path / "notes" / "cards" / "2026" / "07" / "card.md",
+        {
+            "id": "card-1",
+            "track": "industry",
+            "title_zh": "测试卡片",
+            "date": "2026-07-08",
+            "source_url": "https://example.com/a",
+            "source_type": "company-news",
+            "topics": ["agent"],
+            "importance": float("inf"),
+            "review_status": "accepted",
+        },
+        "content",
+    )
+    settings = load_settings(tmp_path)
+
+    extract_preference_features(settings, surface="cards")
+    records = read_feature_records(tmp_path, "cards")
+
+    assert records[0]["features"]["importance"] == 0
 
 
 def write_test_config(root) -> None:

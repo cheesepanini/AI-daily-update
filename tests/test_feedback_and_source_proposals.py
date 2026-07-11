@@ -2,7 +2,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from ai_daily_update.config import load_settings
-from ai_daily_update.feedback.events import read_feedback_events
+from ai_daily_update.feedback.events import append_feedback_event, feedback_log_path, read_feedback_events
 from ai_daily_update.source_proposals import generate_source_proposals, read_source_proposals
 from ai_daily_update.storage.markdown import write_card
 from ai_daily_update.web import create_app
@@ -63,6 +63,22 @@ def test_review_action_writes_feedback_event(tmp_path) -> None:
     assert events[0]["action"] == "accepted"
     assert events[0]["previous_status"] == "needs-review"
     assert events[0]["new_status"] == "accepted"
+
+
+def test_read_feedback_events_skips_corrupted_line_instead_of_raising(tmp_path) -> None:
+    append_feedback_event(
+        tmp_path, "Asia/Shanghai", "card_review", "card", "card-1", "accepted"
+    )
+    log_path = feedback_log_path(tmp_path)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"event_id": "feedback-broken", truncated\n')
+    append_feedback_event(
+        tmp_path, "Asia/Shanghai", "card_review", "card", "card-2", "rejected"
+    )
+
+    events = read_feedback_events(tmp_path)
+
+    assert [event["entity_id"] for event in events] == ["card-1", "card-2"]
 
 
 def test_generate_source_proposals_from_accepted_card_domains(tmp_path) -> None:

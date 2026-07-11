@@ -183,6 +183,40 @@ def test_ppt_plan_action_can_run_as_progress_job(tmp_path) -> None:
     assert list((tmp_path / "notes" / "inbox").glob("*_ppt-update-plan*.json"))
 
 
+def test_ppt_review_items_reflects_latest_plan_even_when_empty(tmp_path) -> None:
+    write_ppt_test_project(tmp_path)
+    client = TestClient(create_app(tmp_path))
+    client.post(
+        "/actions/ppt-plan",
+        data={
+            "preset": "custom",
+            "from_date": "2026-07-07",
+            "to_date": "2026-07-07",
+            "date_basis": "collected",
+            "status": "accepted",
+        },
+    )
+    settings = load_settings(tmp_path)
+    deck = selected_ppt_deck(tmp_path)
+    first_run_items = ppt_review_items(settings, deck, limit=10)
+    assert first_run_items
+
+    time.sleep(0.01)
+    client.post(
+        "/actions/ppt-plan",
+        data={
+            "preset": "custom",
+            "from_date": "2026-07-08",
+            "to_date": "2026-07-08",
+            "date_basis": "collected",
+            "status": "accepted",
+        },
+    )
+
+    latest_run_items = ppt_review_items(settings, deck, limit=10)
+    assert latest_run_items == []
+
+
 def test_ppt_suggestion_action_marks_item_adopted(tmp_path) -> None:
     write_ppt_test_project(tmp_path)
     client = TestClient(create_app(tmp_path))

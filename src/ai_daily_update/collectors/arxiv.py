@@ -74,8 +74,11 @@ def search_latest_arxiv(
 def build_arxiv_search_query(
     categories: list[str], from_date: date | None = None, to_date: date | None = None
 ) -> str:
-    category_query = " OR ".join(f"cat:{category}" for category in categories)
-    if len(categories) > 1:
+    valid_categories = [category.strip() for category in categories if category.strip()]
+    if not valid_categories:
+        raise ValueError("build_arxiv_search_query requires at least one non-empty category")
+    category_query = " OR ".join(f"cat:{category}" for category in valid_categories)
+    if len(valid_categories) > 1:
         category_query = f"({category_query})"
     if from_date or to_date:
         start = _arxiv_date_start(from_date) if from_date else "000101010000"

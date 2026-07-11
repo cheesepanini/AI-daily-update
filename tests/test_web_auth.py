@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from ai_daily_update.storage.markdown import write_card
@@ -70,6 +71,59 @@ def test_auth_login_allows_access(tmp_path) -> None:
     assert "ai_daily_session" in login.headers["set-cookie"]
     assert response.status_code == 200
     assert "每日工作台" in response.text
+
+
+def test_auth_settings_rejects_enabled_without_credentials(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("AI_DAILY_ADMIN_USERNAME", raising=False)
+    monkeypatch.delenv("AI_DAILY_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("AI_DAILY_SESSION_SECRET", raising=False)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text("auth:\n  enabled: true\n", encoding="utf-8")
+    (config_dir / "sources.yaml").write_text("sources: {}\n", encoding="utf-8")
+    (config_dir / "topics.yaml").write_text("topics: {}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        create_app(tmp_path)
+
+
+def test_login_locks_out_after_repeated_failures(tmp_path) -> None:
+    write_auth_config(tmp_path)
+    client = TestClient(create_app(tmp_path))
+
+    for _ in range(5):
+        client.post("/login", data={"username": "reviewer", "password": "wrong"})
+    response = client.post("/login", data={"username": "reviewer", "password": "secret"})
+
+    assert response.status_code == 429
+
+
+def test_logout_invalidates_existing_session_cookie(tmp_path) -> None:
+    write_auth_config(tmp_path)
+    client = TestClient(create_app(tmp_path))
+
+    client.post("/login", data={"username": "reviewer", "password": "secret"})
+    session_cookie = client.cookies.get("ai_daily_session")
+
+    client.post("/logout")
+    client.cookies.set("ai_daily_session", session_cookie)
+    response = client.get("/cards", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_login_sets_secure_cookie_over_https(tmp_path) -> None:
+    write_auth_config(tmp_path)
+    client = TestClient(create_app(tmp_path), base_url="https://testserver")
+
+    response = client.post(
+        "/login",
+        data={"username": "reviewer", "password": "secret"},
+        follow_redirects=False,
+    )
+
+    assert "secure" in response.headers["set-cookie"].lower()
 
 
 def test_anonymous_root_shows_public_cards(tmp_path) -> None:

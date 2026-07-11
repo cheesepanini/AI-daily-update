@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from ai_daily_update.config import Settings
 from ai_daily_update.storage.markdown import iter_cards, read_card
+from ai_daily_update.utils.config import list_section, section
 from ai_daily_update.utils.dates import now_iso
 
 
@@ -140,12 +141,12 @@ def dedupe_proposals(proposals: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def source_configured_domains(sources_config: dict[str, Any]) -> set[str]:
     domains: set[str] = set()
-    sources = sources_config.get("sources", {})
-    if sources.get("arxiv", {}).get("enabled", False):
+    sources = section(sources_config, "sources")
+    if section(sources, "arxiv").get("enabled", False):
         domains.add("arxiv.org")
-    for feed in sources.get("rss", {}).get("feeds", []):
+    for feed in list_section(section(sources, "rss"), "feeds"):
         add_domain(domains, str(feed.get("url", "")))
-    for source in sources.get("company_blogs", {}).get("sources", []):
+    for source in list_section(section(sources, "company_blogs"), "sources"):
         add_domain(domains, str(source.get("url", "")))
     return domains
 

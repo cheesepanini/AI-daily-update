@@ -8,6 +8,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from ai_daily_update.collectors.document import normalize_text
+from ai_daily_update.collectors.encoding import fix_response_encoding
+from ai_daily_update.utils.config import list_section, section
 
 
 @dataclass(frozen=True)
@@ -27,8 +29,9 @@ class CompanyBlogItem:
 
 
 def company_blogs_from_settings(settings: dict) -> list[CompanyBlogConfig]:
-    raw_sources = settings.get("sources", {}).get("company_blogs", {}).get("sources", [])
-    default_track = settings.get("sources", {}).get("company_blogs", {}).get("track", "industry")
+    company_blogs_config = section(section(settings, "sources"), "company_blogs")
+    raw_sources = list_section(company_blogs_config, "sources")
+    default_track = company_blogs_config.get("track", "industry")
     sources: list[CompanyBlogConfig] = []
     for item in raw_sources:
         if isinstance(item, str):
@@ -57,6 +60,7 @@ def fetch_company_blog(
         headers={"User-Agent": "AI-Daily-Update/0.1 (local knowledge base)"},
     )
     response.raise_for_status()
+    fix_response_encoding(response)
     return parse_company_blog_listing(response.text, source)[:max_items]
 
 

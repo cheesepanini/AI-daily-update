@@ -50,9 +50,20 @@ rsync -avz \
   "$PROJECT_DIR/" \
   "$AI_DAILY_REMOTE:$REMOTE_DIR/"
 
-ssh "$AI_DAILY_REMOTE" "
+# ssh concatenates multiple command-line arguments with plain spaces before
+# handing them to the remote shell, so we cannot rely on argv boundaries to
+# keep untrusted values (env vars) from being re-interpreted as shell syntax.
+# Instead, quote each value into a safe shell literal locally (printf %q) and
+# build one fully-quoted command string.
+q_remote_dir=$(printf '%q' "$REMOTE_DIR")
+q_pip_timeout=$(printf '%q' "$PIP_TIMEOUT")
+q_pip_retries=$(printf '%q' "$PIP_RETRIES")
+q_pip_index_url=$(printf '%q' "$PIP_INDEX_URL_REMOTE")
+q_service_name=$(printf '%q' "$SERVICE_NAME")
+
+REMOTE_SCRIPT="
   set -e
-  cd '$REMOTE_DIR'
+  cd $q_remote_dir
   if [ ! -f .venv/bin/activate ]; then
     rm -rf .venv
     if ! python3 -m venv .venv; then
@@ -63,19 +74,33 @@ ssh "$AI_DAILY_REMOTE" "
     fi
   fi
   . .venv/bin/activate
-  python -m pip install --timeout '$PIP_TIMEOUT' --retries '$PIP_RETRIES' -i '$PIP_INDEX_URL_REMOTE' -e .
-  if systemctl list-unit-files '$SERVICE_NAME.service' >/dev/null 2>&1; then
+  python -m pip install --timeout $q_pip_timeout --retries $q_pip_retries -i $q_pip_index_url -e .
+  if systemctl list-unit-files $q_service_name.service >/dev/null 2>&1; then
     if sudo -n true >/dev/null 2>&1; then
-      sudo systemctl restart '$SERVICE_NAME'
-      sudo systemctl status '$SERVICE_NAME' --no-pager
+      sudo systemctl restart $q_service_name
+      sudo systemctl status $q_service_name --no-pager
     else
       echo 'Deployed. Restart requires sudo password on remote:'
       echo '  sudo systemctl restart $SERVICE_NAME'
+      exit 2
     fi
   else
     echo 'Deployed. No systemd service found yet.'
     echo 'Install scripts/systemd/ai-daily-web.service on the remote host, then enable it.'
   fi
 "
+
+set +e
+ssh "$AI_DAILY_REMOTE" "$REMOTE_SCRIPT"
+DEPLOY_STATUS=$?
+set -e
+
+if [ "$DEPLOY_STATUS" -eq 2 ]; then
+  echo "Cloud deploy finished but the remote service was NOT restarted: $AI_DAILY_REMOTE:$REMOTE_DIR"
+  exit 2
+elif [ "$DEPLOY_STATUS" -ne 0 ]; then
+  echo "Cloud deploy failed: $AI_DAILY_REMOTE:$REMOTE_DIR"
+  exit "$DEPLOY_STATUS"
+fi
 
 echo "Cloud deploy finished: $AI_DAILY_REMOTE:$REMOTE_DIR"

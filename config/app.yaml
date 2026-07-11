@@ -9,6 +9,10 @@ daily:
   media_quota: 5
   candidate_limit: 150
   shortlist_limit: 40
+  # Runs inside the web server process (ai-daily serve / ai-daily-web.service).
+  # If you also install a systemd timer or cron job that runs `ai-daily daily`
+  # (see README "本地定时任务" / docs/cloud-deploy.md), set enabled to false
+  # here to avoid triggering the same run twice at the same time.
   schedule:
     enabled: true
     times:

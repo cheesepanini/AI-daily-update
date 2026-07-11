@@ -57,7 +57,6 @@ def ensure_columns(connection: sqlite3.Connection) -> None:
 
 def reset_cards(connection: sqlite3.Connection) -> None:
     connection.execute("DELETE FROM cards")
-    connection.commit()
 
 
 def upsert_card(connection: sqlite3.Connection, path: Path, metadata: dict[str, Any]) -> None:
@@ -116,7 +115,6 @@ def upsert_card(connection: sqlite3.Connection, path: Path, metadata: dict[str, 
             metadata.get("created_at", ""),
         ),
     )
-    connection.commit()
 
 
 def query_cards(

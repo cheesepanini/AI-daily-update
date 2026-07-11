@@ -7,6 +7,7 @@ from ai_daily_update.web import (
     add_source_topic_option,
     create_app,
     parse_daily_schedule_times,
+    safe_int_value,
     trend_group_count,
     trend_term_groups,
     update_source_enabled,
@@ -264,3 +265,9 @@ def test_parse_daily_schedule_times_ignores_invalid_values() -> None:
     parsed = parse_daily_schedule_times(["08:00", "18:00", "25:00", "bad", "8:00", "08:00"])
 
     assert parsed == [(8, 0), (18, 0)]
+
+
+def test_safe_int_value_handles_infinity_without_crashing() -> None:
+    assert safe_int_value(float("inf"), default=9999) == 9999
+    assert safe_int_value(float("-inf"), default=9999) == 9999
+    assert safe_int_value(float("nan"), default=9999) == 9999

@@ -1,3 +1,5 @@
+import pytest
+
 from ai_daily_update.storage.indexer import rebuild_index
 from ai_daily_update.storage import db
 from ai_daily_update.storage.markdown import write_card
@@ -25,6 +27,39 @@ def test_rebuild_index_indexes_cards(tmp_path) -> None:
 
     assert indexed == 1
     assert warnings == []
+
+
+def test_rebuild_index_rolls_back_on_failure_and_keeps_prior_index(tmp_path) -> None:
+    markdown_root = tmp_path / "notes"
+    sqlite_path = tmp_path / "data" / "kb.sqlite"
+    write_card(
+        markdown_root / "cards" / "2026" / "07" / "card.md",
+        {
+            "id": "card-1",
+            "track": "industry",
+            "title_zh": "标题",
+            "date": "2026-07-06",
+            "source_url": "https://example.com",
+            "topics": ["ai-industry"],
+            "entities": [],
+            "review_status": "accepted",
+        },
+        "content",
+    )
+    indexed, warnings = rebuild_index(markdown_root, sqlite_path)
+    assert indexed == 1
+    assert warnings == []
+
+    broken_path = markdown_root / "cards" / "2026" / "07" / "broken.md"
+    broken_path.parent.mkdir(parents=True, exist_ok=True)
+    broken_path.write_text("---\nid: [unterminated\n---\ncontent\n", encoding="utf-8")
+
+    with pytest.raises(Exception):
+        rebuild_index(markdown_root, sqlite_path)
+
+    connection = db.connect(sqlite_path)
+    rows = db.query_cards(connection, "2026-01-01", "2026-12-31", None, "industry")
+    assert [row["id"] for row in rows] == ["card-1"]
 
 
 def test_query_cards_filters_academic_and_industry_audience(tmp_path) -> None:

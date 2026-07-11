@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ai_daily_update.processors.candidates import Candidate, with_updates
+from ai_daily_update.utils.config import section
 
 
 SOURCE_WEIGHTS = {
@@ -14,16 +15,16 @@ SOURCE_WEIGHTS = {
 def score_candidate(
     candidate: Candidate, topics_config: dict, scoring_config: dict | None = None
 ) -> Candidate:
-    candidate_scoring = (scoring_config or {}).get("candidate_scoring", {})
-    source_weights = candidate_scoring.get("source_weights", SOURCE_WEIGHTS)
+    candidate_scoring = section(scoring_config, "candidate_scoring")
+    source_weights = candidate_scoring.get("source_weights") or SOURCE_WEIGHTS
     topic_multiplier = int(candidate_scoring.get("topic_priority_multiplier", 10))
-    bonuses = candidate_scoring.get("bonuses", {})
+    bonuses = section(candidate_scoring, "bonuses")
     reasons: list[str] = []
     score = int(source_weights.get(candidate.source_kind, 5))
     reasons.append(f"source:{candidate.source_kind}+{score}")
     topic_priority = 0
     for topic in candidate.topics:
-        priority = int(topics_config.get("topics", {}).get(topic, {}).get("priority", 1))
+        priority = int(section(section(topics_config, "topics"), topic).get("priority", 1))
         topic_priority = max(topic_priority, priority)
     topic_points = topic_priority * topic_multiplier
     score += topic_points

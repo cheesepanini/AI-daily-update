@@ -54,12 +54,17 @@ def build_card_metadata(candidate: Candidate, day: date, timezone: str) -> dict:
         "topics": candidate.topics,
         "keywords_en": candidate.topics,
         "entities": [domain] if domain else [],
-        "importance": 3,
-        "novelty": 3,
-        "confidence": 2,
-        "book_potential": 3,
-        "ppt_potential": 3,
-        "public_brief_potential": 3,
+        # Unscored until a human (or a future LLM scoring step) actually
+        # assesses the card. Defaulting these to a fabricated "medium" rating
+        # (e.g. 3) would let unreviewed cards silently drive both the
+        # auto-review accept/reject decision and the public-brief filter
+        # (`public_brief_potential >= 3`) as if someone had vetted them.
+        "importance": 0,
+        "novelty": 0,
+        "confidence": 0,
+        "book_potential": 0,
+        "ppt_potential": 0,
+        "public_brief_potential": 0,
         "review_status": "needs-review",
         "created_at": now_iso(timezone),
     }

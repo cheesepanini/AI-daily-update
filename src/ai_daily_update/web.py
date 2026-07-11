@@ -53,6 +53,7 @@ from ai_daily_update.trends import (
     trend_matches,
     trend_term_groups as build_trend_term_groups,
 )
+from ai_daily_update.utils.config import list_section, section
 from ai_daily_update.utils.dates import now_iso, today_in_timezone
 
 
@@ -98,6 +99,37 @@ JOBS_LOCK = threading.Lock()
 SCHEDULER_LOCK = threading.Lock()
 SCHEDULER_THREADS: dict[str, threading.Thread] = {}
 
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300.0
+
+
+def login_rate_limited(app: FastAPI, client_ip: str) -> bool:
+    state = _login_attempts_state(app)
+    with state["lock"]:
+        attempts = state["attempts"].get(client_ip, [])
+        cutoff = time.time() - LOGIN_WINDOW_SECONDS
+        attempts = [attempt for attempt in attempts if attempt >= cutoff]
+        state["attempts"][client_ip] = attempts
+        return len(attempts) >= LOGIN_MAX_ATTEMPTS
+
+
+def record_login_failure(app: FastAPI, client_ip: str) -> None:
+    state = _login_attempts_state(app)
+    with state["lock"]:
+        state["attempts"].setdefault(client_ip, []).append(time.time())
+
+
+def clear_login_failures(app: FastAPI, client_ip: str) -> None:
+    state = _login_attempts_state(app)
+    with state["lock"]:
+        state["attempts"].pop(client_ip, None)
+
+
+def _login_attempts_state(app: FastAPI) -> dict[str, Any]:
+    if not hasattr(app.state, "login_attempts"):
+        app.state.login_attempts = {"lock": threading.Lock(), "attempts": {}}
+    return app.state.login_attempts
+
 
 def install_auth(app: FastAPI, settings: Settings) -> None:
     if not auth_settings(settings)["enabled"]:
@@ -119,23 +151,24 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
 
 def auth_settings(settings: Settings) -> dict[str, Any]:
     config = settings.app.get("auth", {})
-    username = (
-        str(config.get("username") or "")
-        or os.getenv(str(config.get("username_env") or "AI_DAILY_ADMIN_USERNAME"), "")
-        or "admin"
+    enabled = bool(config.get("enabled", False))
+    username = str(config.get("username") or "") or os.getenv(
+        str(config.get("username_env") or "AI_DAILY_ADMIN_USERNAME"), ""
     )
-    password = (
-        str(config.get("password") or "")
-        or os.getenv(str(config.get("password_env") or "AI_DAILY_ADMIN_PASSWORD"), "")
-        or "admin"
+    password = str(config.get("password") or "") or os.getenv(
+        str(config.get("password_env") or "AI_DAILY_ADMIN_PASSWORD"), ""
     )
-    secret = (
-        str(config.get("session_secret") or "")
-        or os.getenv(str(config.get("session_secret_env") or "AI_DAILY_SESSION_SECRET"), "")
-        or hashlib.sha256(f"{settings.root}:{username}:{password}".encode("utf-8")).hexdigest()
+    secret = str(config.get("session_secret") or "") or os.getenv(
+        str(config.get("session_secret_env") or "AI_DAILY_SESSION_SECRET"), ""
     )
+    if enabled and (not username or not password or not secret):
+        raise RuntimeError(
+            "auth.enabled is true but username/password/session_secret are not configured. "
+            "Set AI_DAILY_ADMIN_USERNAME, AI_DAILY_ADMIN_PASSWORD and AI_DAILY_SESSION_SECRET "
+            "(or the matching auth.* keys in config/app.yaml)."
+        )
     return {
-        "enabled": bool(config.get("enabled", False)),
+        "enabled": enabled,
         "username": username,
         "password": password,
         "secret": secret,
@@ -150,9 +183,29 @@ def credentials_match(username: str, password: str, auth: dict[str, Any]) -> boo
     )
 
 
-def build_auth_token(username: str, auth: dict[str, Any]) -> str:
+def session_epoch_path(settings: Settings) -> Path:
+    return settings.root / "data" / ".session_epoch"
+
+
+def read_session_epoch(settings: Settings) -> int:
+    path = session_epoch_path(settings)
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def bump_session_epoch(settings: Settings) -> int:
+    path = session_epoch_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    epoch = read_session_epoch(settings) + 1
+    path.write_text(str(epoch), encoding="utf-8")
+    return epoch
+
+
+def build_auth_token(username: str, auth: dict[str, Any], epoch: int) -> str:
     expires_at = int(time.time() + float(auth["session_hours"]) * 3600)
-    payload = f"{username}|{expires_at}"
+    payload = f"{username}|{expires_at}|{epoch}"
     signature = sign_auth_payload(payload, auth)
     return f"{payload}|{signature}"
 
@@ -163,16 +216,19 @@ def auth_session_valid(request: Request, settings: Settings) -> bool:
         return True
     token = request.cookies.get("ai_daily_session", "")
     parts = token.split("|")
-    if len(parts) != 3:
+    if len(parts) != 4:
         return False
-    username, expires_text, signature = parts
+    username, expires_text, epoch_text, signature = parts
     try:
         expires_at = int(expires_text)
+        epoch = int(epoch_text)
     except ValueError:
         return False
     if expires_at < int(time.time()):
         return False
-    payload = f"{username}|{expires_at}"
+    if epoch != read_session_epoch(settings):
+        return False
+    payload = f"{username}|{expires_at}|{epoch}"
     expected = sign_auth_payload(payload, auth)
     return hmac.compare_digest(username, str(auth["username"])) and hmac.compare_digest(
         signature,
@@ -211,19 +267,30 @@ def create_app(root: Path | None = None) -> FastAPI:
         username: str = Form(default=""),
         password: str = Form(default=""),
     ):
+        client_ip = request.client.host if request.client else "unknown"
+        if login_rate_limited(app, client_ip):
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {"request": request, "error": "登录尝试过多，请稍后再试。"},
+                status_code=429,
+            )
         auth = auth_settings(settings)
         if not credentials_match(username, password, auth):
+            record_login_failure(app, client_ip)
             return templates.TemplateResponse(
                 request,
                 "login.html",
                 {"request": request, "error": "用户名或密码不正确。"},
                 status_code=401,
             )
+        clear_login_failures(app, client_ip)
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
             "ai_daily_session",
-            build_auth_token(auth["username"], auth),
+            build_auth_token(auth["username"], auth, read_session_epoch(settings)),
             httponly=True,
+            secure=request.url.scheme == "https",
             samesite="lax",
             max_age=int(auth["session_hours"] * 3600),
         )
@@ -231,6 +298,7 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.post("/logout")
     def logout_action() -> RedirectResponse:
+        bump_session_epoch(settings)
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie("ai_daily_session")
         return response
@@ -743,6 +811,11 @@ def create_app(root: Path | None = None) -> FastAPI:
         dry_run: bool = Form(default=True),
         manual_only: bool = Form(default=False),
     ):
+        if has_running_daily_job():
+            error = "已有一次生成/预跑任务在进行中，请等待其完成后再试。"
+            if request.headers.get("x-requested-with") == "fetch":
+                return JSONResponse({"error": error}, status_code=409)
+            return RedirectResponse(f"/?{urlencode({'error': error})}", status_code=303)
         job_id = start_daily_job(dry_run=dry_run, manual_only=manual_only, root=settings.root)
         if request.headers.get("x-requested-with") == "fetch":
             return JSONResponse({"job_id": job_id, "job": job_snapshot(job_id)})
@@ -834,7 +907,7 @@ def create_app(root: Path | None = None) -> FastAPI:
             return JSONResponse({"job_id": job_id, "job": job_snapshot(job_id)})
         from ai_daily_update.cli import _llm_client
 
-        llm_client = _llm_client(settings) if settings.app.get("ppt", {}).get("llm_polish", False) else None
+        llm_client = _llm_client(settings) if section(settings.app, "ppt").get("llm_polish", False) else None
 
         generate_ppt_plan(
             settings.markdown_root,
@@ -1634,22 +1707,19 @@ def ppt_review_items(settings: Settings, deck: PPTDeck, limit: int = 24) -> list
     link_state = read_ppt_card_links(settings)
     old_states = read_review_state(ppt_review_state_path(settings))
     items = []
-    json_paths = latest_ppt_plan_json_paths(settings.markdown_root, deck, limit=20)
+    json_paths = latest_ppt_plan_json_paths(settings.markdown_root, deck, limit=1)
     if json_paths:
-        for path in json_paths:
-            parsed_items = parse_ppt_plan_json_items(settings, deck, path)
-            if not parsed_items:
-                continue
-            for item in parsed_items:
-                state = link_state.get("suggestions", {}).get(item["id"], old_states.get(item["id"], {}))
-                item["status"] = state.get("status", "pending")
-                item["status_label"] = ppt_review_status_label(item["status"])
-                item["updated_at"] = state.get("updated_at", "")
-                items.append(item)
-            items.sort(key=ppt_review_item_sort_key)
-            return items[:limit]
-    for path in latest_ppt_plan_paths(settings.markdown_root, deck, limit=4):
-        for item in parse_ppt_plan_review_items(path):
+        for item in parse_ppt_plan_json_items(settings, deck, json_paths[0]):
+            state = link_state.get("suggestions", {}).get(item["id"], old_states.get(item["id"], {}))
+            item["status"] = state.get("status", "pending")
+            item["status_label"] = ppt_review_status_label(item["status"])
+            item["updated_at"] = state.get("updated_at", "")
+            items.append(item)
+        items.sort(key=ppt_review_item_sort_key)
+        return items[:limit]
+    md_paths = latest_ppt_plan_paths(settings.markdown_root, deck, limit=1)
+    if md_paths:
+        for item in parse_ppt_plan_review_items(md_paths[0]):
             state = old_states.get(item["id"], {})
             item["status"] = state.get("status", "pending")
             item["status_label"] = ppt_review_status_label(item["status"])
@@ -1668,7 +1738,7 @@ def ppt_review_item_sort_key(item: dict[str, Any]) -> tuple[int, str]:
 def safe_int_value(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -2099,7 +2169,8 @@ def read_ppt_card_links(settings: Settings) -> dict[str, Any]:
     if not path.exists():
         return {"suggestions": {}}
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    data.setdefault("suggestions", {})
+    if not isinstance(data.get("suggestions"), dict):
+        data["suggestions"] = {}
     return data
 
 
@@ -2890,12 +2961,12 @@ def source_suggestion_status_class(status: str) -> str:
 
 def configured_source_urls(sources_config: dict[str, Any]) -> set[str]:
     urls = set()
-    sources = sources_config.get("sources", {})
-    for feed in sources.get("rss", {}).get("feeds", []):
+    sources = section(sources_config, "sources")
+    for feed in list_section(section(sources, "rss"), "feeds"):
         url = str(feed.get("url", "")).rstrip("/")
         if url:
             urls.add(url)
-    for source in sources.get("company_blogs", {}).get("sources", []):
+    for source in list_section(section(sources, "company_blogs"), "sources"):
         url = str(source.get("url", "")).rstrip("/")
         if url:
             urls.add(url)
@@ -2918,9 +2989,9 @@ def stable_id(text: str) -> str:
 
 
 def source_entries(settings: Settings) -> list[dict[str, Any]]:
-    sources = settings.sources.get("sources", {})
+    sources = section(settings.sources, "sources")
     entries: list[dict[str, Any]] = []
-    arxiv_config = sources.get("arxiv", {})
+    arxiv_config = section(sources, "arxiv")
     entries.append(
         source_entry(
             settings.sources,
@@ -2935,7 +3006,8 @@ def source_entries(settings: Settings) -> list[dict[str, Any]]:
             source_key="arxiv",
         )
     )
-    for index, feed in enumerate(sources.get("rss", {}).get("feeds", [])):
+    rss_config = section(sources, "rss")
+    for index, feed in enumerate(list_section(rss_config, "feeds")):
         entries.append(
             source_entry(
                 settings.sources,
@@ -2943,14 +3015,14 @@ def source_entries(settings: Settings) -> list[dict[str, Any]]:
                 kind="rss",
                 track=feed.get("track", "industry"),
                 url=feed.get("url", ""),
-                enabled=bool(sources.get("rss", {}).get("enabled", False))
+                enabled=bool(rss_config.get("enabled", False))
                 and feed.get("enabled", True) is not False,
                 raw=feed,
                 source_key=f"rss:{index}",
             )
         )
-    company_config = sources.get("company_blogs", {})
-    for index, item in enumerate(company_config.get("sources", [])):
+    company_config = section(sources, "company_blogs")
+    for index, item in enumerate(list_section(company_config, "sources")):
         entries.append(
             source_entry(
                 settings.sources,
@@ -3033,8 +3105,8 @@ def source_topic_label(theme_id: str, labels: dict[str, str]) -> str:
 
 def source_topic_label_map(sources_config: dict[str, Any]) -> dict[str, str]:
     labels = dict(SOURCE_THEME_LABELS)
-    options = list(sources_config.get("source_topics", []))
-    options.extend(sources_config.get("sources", {}).get("source_topics", []))
+    options = list_section(sources_config, "source_topics")
+    options = list(options) + list_section(section(sources_config, "sources"), "source_topics")
     for option in options:
         if not isinstance(option, dict):
             continue
@@ -3227,7 +3299,7 @@ def ppt_plan_date_range(
 
 
 def configure_daily_scheduler(settings: Settings) -> None:
-    schedule_config = settings.app.get("daily", {}).get("schedule", {})
+    schedule_config = section(section(settings.app, "daily"), "schedule")
     if not schedule_config.get("enabled", False):
         return
     schedule_times = parse_daily_schedule_times(schedule_config.get("times", []))
@@ -3336,7 +3408,7 @@ def run_ppt_plan_job(job_id: str) -> None:
     try:
         job_log(job_id, f"选择 PPT：{deck.label}")
         job_log(job_id, f"时间范围：{snapshot.get('from_date')} 至 {snapshot.get('to_date')}")
-        if settings.app.get("ppt", {}).get("llm_polish", False):
+        if section(settings.app, "ppt").get("llm_polish", False):
             job_update(job_id, step="正在生成结构化建议，并调用 LLM 改写讲稿")
             job_log(job_id, "LLM 讲稿化改写已启用")
             llm_client = _llm_client(settings)
@@ -3535,12 +3607,13 @@ def trend_source_texts(settings: Settings) -> list[str]:
 
 def configured_topic_terms(settings: Settings) -> set[str]:
     terms = set()
-    for topic_id, topic in settings.topics.get("topics", {}).items():
+    for topic_id, topic in section(settings.topics, "topics").items():
+        topic = topic if isinstance(topic, dict) else {}
         terms.add(str(topic_id).lower())
         for key in ["name_zh", "name_en"]:
             if topic.get(key):
                 terms.add(str(topic[key]).lower())
-        for alias in topic.get("aliases", []):
+        for alias in topic.get("aliases", []) or []:
             terms.add(str(alias).lower())
     return terms
 

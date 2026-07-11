@@ -55,5 +55,12 @@ def read_feedback_events(root: Path) -> list[dict[str, Any]]:
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        events.append(json.loads(line))
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            # One truncated/corrupted line (e.g. from a crash mid-write)
+            # should not take down every reader of this append-only log:
+            # the web preference dashboard and preference-feature
+            # extraction both depend on being able to read the rest of it.
+            continue
     return events

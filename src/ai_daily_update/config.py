@@ -9,6 +9,8 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+from ai_daily_update.utils.config import section
+
 
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
@@ -46,30 +48,28 @@ class Settings:
 
     @property
     def markdown_root(self) -> Path:
-        return self.root / self.app.get("storage", {}).get("markdown_root", "notes")
+        return self.root / section(self.app, "storage").get("markdown_root", "notes")
 
     @property
     def sqlite_path(self) -> Path:
-        return self.root / self.app.get("storage", {}).get("sqlite_path", "data/kb.sqlite")
+        return self.root / section(self.app, "storage").get("sqlite_path", "data/kb.sqlite")
 
     @property
     def manual_urls_path(self) -> Path:
-        input_file = (
-            self.sources.get("sources", {})
-            .get("manual", {})
-            .get("input_file", "data/manual_urls.txt")
+        input_file = section(section(self.sources, "sources"), "manual").get(
+            "input_file", "data/manual_urls.txt"
         )
         return self.root / input_file
 
     @property
     def review_statuses(self) -> list[str]:
-        return self.app.get("review", {}).get(
+        return section(self.app, "review").get(
             "statuses", ["needs-review", "accepted", "later", "rejected"]
         )
 
     @property
     def max_cards(self) -> int:
-        return int(self.app.get("daily", {}).get("max_cards", 5))
+        return int(section(self.app, "daily").get("max_cards", 5))
 
 
 def load_settings(root: Path | None = None) -> Settings:

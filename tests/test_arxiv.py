@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from ai_daily_update.collectors.arxiv import (
     build_arxiv_search_query,
     extract_arxiv_id,
@@ -44,6 +46,19 @@ def test_parse_arxiv_atom_builds_source_document() -> None:
     assert "Authors: Ashish Vaswani, Noam Shazeer" in document.text
     assert "Primary category: cs.CL" in document.text
     assert "Abstract:" in document.text
+
+
+def test_build_arxiv_search_query_rejects_empty_categories() -> None:
+    with pytest.raises(ValueError):
+        build_arxiv_search_query([])
+    with pytest.raises(ValueError):
+        build_arxiv_search_query(["", "  "])
+
+
+def test_build_arxiv_search_query_skips_blank_categories() -> None:
+    query = build_arxiv_search_query(["cs.AI", "", "cs.CL"])
+
+    assert query == "(cat:cs.AI OR cat:cs.CL)"
 
 
 def test_build_arxiv_search_query_supports_categories_and_date_range() -> None:

@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 
 from ai_daily_update.collectors.arxiv import fetch_arxiv_document, is_arxiv_url
 from ai_daily_update.collectors.document import SourceDocument, normalize_text
+from ai_daily_update.collectors.encoding import fix_response_encoding
 
 
 def fetch_source_document(url: str, timeout: int = 20) -> SourceDocument:
@@ -21,6 +22,7 @@ def fetch_source_document(url: str, timeout: int = 20) -> SourceDocument:
         },
     )
     response.raise_for_status()
+    fix_response_encoding(response)
     content_type = response.headers.get("content-type", "")
     if "html" not in content_type.lower() and response.text.lstrip().startswith("<") is False:
         text = normalize_text(response.text)

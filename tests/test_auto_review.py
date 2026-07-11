@@ -1,7 +1,13 @@
 from datetime import date
 
-from ai_daily_update.review.auto import auto_review_stale_cards
+from ai_daily_update.review.auto import auto_review_stale_cards, safe_int
 from ai_daily_update.storage.markdown import read_card, write_card
+
+
+def test_safe_int_handles_infinity_without_crashing() -> None:
+    assert safe_int(float("inf")) == 0
+    assert safe_int(float("-inf")) == 0
+    assert safe_int(float("nan")) == 0
 
 
 TOPICS = {

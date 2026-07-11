@@ -565,6 +565,11 @@ scripts/cron/ai-daily-pull-cloud-state.cron
 
 ## 本地定时任务
 
+注意：网页服务（`ai-daily serve` / systemd `ai-daily-web.service`）内置了一个调度线程，会按 `config/app.yaml` 里 `daily.schedule` 配置的时间点自动触发生成。如果你同时按下文安装了 systemd timer 或 cron，两套机制会在同一时间点各自触发一次 `daily` 任务——虽然文件锁保证不会互相破坏数据，但会导致同一时段被触发两次（浪费一次采集/LLM 调用）。二者选一即可：
+
+- 只用网页服务：保持 `daily.schedule.enabled: true`，不要再安装下面的 systemd timer / cron。
+- 只用系统定时任务：把 `config/app.yaml` 里的 `daily.schedule.enabled` 改成 `false`，再安装 systemd timer 或 cron。
+
 本地 daily 脚本：
 
 ```text
