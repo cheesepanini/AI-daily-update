@@ -2,12 +2,24 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
+import json
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 from ai_daily_update.processors.candidates import Candidate
 from ai_daily_update.utils.dates import now_iso
 from ai_daily_update.utils.slug import slugify
+
+
+QUALITY_SCORE_FIELDS = [
+    "importance",
+    "novelty",
+    "confidence",
+    "book_potential",
+    "ppt_potential",
+    "public_brief_potential",
+]
 
 
 ACADEMIC_SECTIONS = [
@@ -178,3 +190,78 @@ def build_placeholder_content(candidate: Candidate) -> str:
 
 def card_path(markdown_root, day: date, card_id: str):
     return markdown_root / "cards" / f"{day.year:04d}" / f"{day.month:02d}" / f"{card_id}.md"
+
+
+def score_card_quality_with_llm(
+    metadata: dict, content: str, llm_client: Any | None
+) -> dict[str, int]:
+    """Ask the LLM to rate a freshly generated card 1-5 on each quality field.
+
+    Only called on genuinely LLM-generated content (never on placeholder
+    text), so a low score is a real signal rather than noise. Returns {} on
+    any failure so callers keep the metadata's existing (0 = unscored) values
+    instead of a fabricated one.
+    """
+    if not llm_client or not getattr(llm_client, "available", False):
+        return {}
+    prompt = build_card_quality_prompt(metadata, content)
+    try:
+        response = llm_client.generate_card_content(prompt)
+    except Exception:
+        return {}
+    return parse_card_quality_response(response) or {}
+
+
+def build_card_quality_prompt(metadata: dict, content: str) -> str:
+    return (
+        "你是中文 AI 知识库质量评审员。请为下面这张刚生成的知识卡片打分（1-5 分，5 分最高）。\n"
+        "字段含义：\n"
+        "- importance：对 AI 行业/学术前沿的重要程度。\n"
+        "- novelty：信息的新颖度，是否是新进展而非旧消息重复。\n"
+        "- confidence：正文事实的可信度（是否有明确来源、是否有“待核实”标注）。\n"
+        "- book_potential：是否适合用于图书内容更新。\n"
+        "- ppt_potential：是否适合用于 PPT 讲稿。\n"
+        "- public_brief_potential：是否适合放进面向公众的简报。\n"
+        "要求：\n"
+        "1. 只输出 JSON，不要 Markdown，不要解释。\n"
+        "2. 输出格式为 "
+        '{"scores":{"importance":1-5,"novelty":1-5,"confidence":1-5,'
+        '"book_potential":1-5,"ppt_potential":1-5,"public_brief_potential":1-5}}。\n'
+        "3. 六个字段都必须给分，不要遗漏，也不要用 0。\n\n"
+        f"title: {metadata.get('title_zh') or metadata.get('title_en', '')}\n"
+        f"track: {metadata.get('track', '')}\n"
+        f"topics: {', '.join(metadata.get('topics', []) or [])}\n\n"
+        f"正文：\n{content[:4000]}"
+    )
+
+
+def parse_card_quality_response(content: str | None) -> dict[str, int] | None:
+    if not content:
+        return None
+    text = content.strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("scores"), dict):
+        return None
+    scores: dict[str, int] = {}
+    for field in QUALITY_SCORE_FIELDS:
+        try:
+            value = int(parsed["scores"][field])
+        except (KeyError, TypeError, ValueError):
+            continue
+        scores[field] = max(1, min(5, value))
+    if len(scores) < len(QUALITY_SCORE_FIELDS):
+        return None
+    return scores

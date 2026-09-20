@@ -25,6 +25,7 @@ from ai_daily_update.processors.card_builder import (
     build_card_metadata,
     build_placeholder_content,
     card_path,
+    score_card_quality_with_llm,
 )
 from ai_daily_update.processors.candidates import (
     Candidate,
@@ -37,6 +38,7 @@ from ai_daily_update.processors.classify import classify_candidate_topics
 from ai_daily_update.processors.dedupe import dedupe_by_url, normalize_url_for_dedupe
 from ai_daily_update.processors.digest import expand_digest_candidate, should_split_digest
 from ai_daily_update.processors.metadata import infer_title_zh
+from ai_daily_update.processors.retrieval import find_duplicate_suspect, find_related_cards
 from ai_daily_update.processors.score import score_candidate, select_top_candidates
 from ai_daily_update.utils.config import list_section, section
 from ai_daily_update.utils.lock import LockBusyError, exclusive_file_lock
@@ -91,7 +93,9 @@ def _llm_client(settings: Settings) -> OpenAIClient:
 
 
 def _prompt_for_candidate(
-    candidate: Candidate, source_document: SourceDocument | None
+    candidate: Candidate,
+    source_document: SourceDocument | None,
+    related_cards: list[dict[str, str]] | None = None,
 ) -> str:
     source_material = "未能抓取正文，请仅基于已知元数据生成，并明确标注待核实。"
     if source_document and source_document.text:
@@ -101,6 +105,12 @@ Fetched description: {source_document.description}
 Fetched text excerpt:
 {source_document.text[:12000]}
 """
+    related_material = "暂无明显相关的已有卡片。"
+    if related_cards:
+        related_material = "\n".join(
+            f"- {item['title']}（{item['date']}）：{item['conclusion'] or '（无一句话结论）'}"
+            for item in related_cards
+        )
     return f"""
 请根据以下来源材料生成中文知识卡片草稿。
 
@@ -112,6 +122,7 @@ Fetched text excerpt:
 - 不要把整段结果包裹在 ```markdown 或其他代码块中。
 - 第一行必须是一级标题，格式为：# 知识卡片：中文标题。
 - 尽量使用如下小节：一句话结论、事件概述或研究问题、方法/产品要点、主要结果或产业意义、为什么重要、局限与不确定性、可用于图书/PPT/简报的角度、原始材料。
+- 参考下面的“已有相关卡片”，避免与它们重复陈述同一事实；如果本条是对它们的延续或更新，请在“与既有脉络的关系”或“为什么重要”中简要说明增量信息。
 
 URL: {candidate.url}
 Track: {candidate.track}
@@ -120,6 +131,9 @@ Manual title: {candidate.title}
 Candidate summary: {getattr(candidate, "summary", "")}
 Parent digest: {getattr(candidate, "parent_title", "")}
 Parent URL: {getattr(candidate, "parent_url", "")}
+
+已有相关卡片（供参考，不要复制措辞）：
+{related_material}
 
 Source material:
 {source_material}
@@ -443,7 +457,15 @@ def _run_daily_pipeline_locked(
             f"正在生成第 {index}/{total_to_generate} 张{card_kind}卡片：{candidate.title[:48]}",
         )
         try:
+            candidate_url_key = normalize_url_for_dedupe(candidate.url)
+            if candidate_url_key in existing_source_urls:
+                skipped += 1
+                emit_progress(progress, f"已跳过第 {index}/{total_to_generate} 张：同一来源已生成卡片")
+                continue
             metadata = build_card_metadata(candidate, run_day, settings.timezone)
+            duplicate_suspect = find_duplicate_suspect(candidate, settings.markdown_root)
+            if duplicate_suspect:
+                metadata["duplicate_suspect"] = duplicate_suspect
             source_document = None
             try:
                 source_document = fetch_source_document(candidate.parent_url or candidate.url)
@@ -454,12 +476,19 @@ def _run_daily_pipeline_locked(
             content = None
             if llm.available:
                 try:
-                    content = llm.generate_card_content(_prompt_for_candidate(candidate, source_document))
+                    related_cards = find_related_cards(candidate, settings.markdown_root)
+                    content = llm.generate_card_content(
+                        _prompt_for_candidate(candidate, source_document, related_cards)
+                    )
                 except Exception as exc:
                     typer.echo(f"warning: failed to generate content for {candidate.url}: {exc}", err=True)
-            content = clean_llm_markdown(content) or build_placeholder_content(candidate)
+            content = clean_llm_markdown(content)
+            content_from_llm = bool(content)
+            content = content or build_placeholder_content(candidate)
             metadata = apply_content_date(metadata, candidate, content)
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
+            if content_from_llm and llm.available:
+                metadata.update(score_card_quality_with_llm(metadata, content, llm))
             card_day = date.fromisoformat(str(metadata["date"]))
             path = card_path(settings.markdown_root, card_day, metadata["id"])
             if path.exists():
@@ -467,6 +496,7 @@ def _run_daily_pipeline_locked(
                 emit_progress(progress, f"已跳过第 {index}/{total_to_generate} 张：卡片已存在")
                 continue
             write_card(path, metadata, content)
+            existing_source_urls.add(candidate_url_key)
             created += 1
             emit_progress(progress, f"已完成 {created}/{total_to_generate} 张：{metadata.get('title_zh') or candidate.title}")
             typer.echo(f"created {path}")
@@ -801,6 +831,57 @@ def index_command() -> None:
         typer.echo(f"warning: {warning}", err=True)
 
 
+@app.command("rescore-cards")
+def rescore_cards_command(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="List cards that would be re-scored without calling the LLM.")
+    ] = False,
+) -> None:
+    """Re-score cards that still carry the legacy fake quality values (3/3/2/3/3/3) with real LLM scores."""
+    settings = _settings()
+    llm = _llm_client(settings)
+    if not dry_run and not llm.available:
+        typer.echo("error: LLM not configured, cannot rescore. Use --dry-run to only list affected cards.", err=True)
+        raise typer.Exit(code=1)
+    stale_paths = [
+        path for path in iter_cards(settings.markdown_root) if has_stale_fake_quality_scores(read_card(path).metadata)
+    ]
+    typer.echo(f"Found {len(stale_paths)} card(s) with stale fake quality scores.")
+    if dry_run:
+        for path in stale_paths:
+            typer.echo(f"would rescore: {path}")
+        return
+    rescored = 0
+    for index, path in enumerate(stale_paths, start=1):
+        card = read_card(path)
+        try:
+            scores = score_card_quality_with_llm(card.metadata, card.content, llm)
+        except Exception as exc:
+            typer.echo(f"warning: failed to score {path}: {exc}", err=True)
+            continue
+        if not scores:
+            typer.echo(f"warning: no valid score returned for {path}", err=True)
+            continue
+        write_card(path, {**card.metadata, **scores}, card.content)
+        rescored += 1
+        typer.echo(f"rescored {rescored}/{len(stale_paths)}: {path}")
+    indexed, warnings = rebuild_index(settings.markdown_root, settings.sqlite_path)
+    typer.echo(f"Rescored {rescored}/{len(stale_paths)} card(s). Indexed {indexed} card(s).")
+    for warning in warnings:
+        typer.echo(f"warning: {warning}", err=True)
+
+
+def has_stale_fake_quality_scores(metadata: dict) -> bool:
+    return (
+        metadata.get("importance") == 3
+        and metadata.get("novelty") == 3
+        and metadata.get("confidence") == 2
+        and metadata.get("book_potential") == 3
+        and metadata.get("ppt_potential") == 3
+        and metadata.get("public_brief_potential") == 3
+    )
+
+
 @app.command()
 def brief(
     from_date: Annotated[str, typer.Option("--from-date", help="Start date YYYY-MM-DD.")],
@@ -829,6 +910,7 @@ def brief(
         topic_list,
         audience,
         date_basis=date_basis,
+        llm_client=_llm_client(settings),
     )
     typer.echo(f"Brief written: {output_path}")
 

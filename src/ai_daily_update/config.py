@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,7 @@ class Settings:
     sources: dict[str, Any]
     scoring: dict[str, Any]
     prompts: dict[str, Any]
+    concepts: dict[str, Any] = field(default_factory=dict)
 
     @property
     def timezone(self) -> str:
@@ -83,4 +84,5 @@ def load_settings(root: Path | None = None) -> Settings:
         sources=load_yaml(config_dir / "sources.yaml"),
         scoring=load_yaml(config_dir / "scoring.yaml"),
         prompts=load_yaml(config_dir / "prompts.yaml"),
+        concepts=load_yaml(config_dir / "foundational_concepts.yaml"),
     )

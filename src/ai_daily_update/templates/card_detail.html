@@ -19,6 +19,13 @@
   </div>
 </section>
 
+{% if card.duplicate_suspect %}
+<section class="panel warning">
+  疑似重复：与已有卡片「{{ card.duplicate_suspect.title }}」（{{ card.duplicate_suspect.date }}）可能报道同一事件，请复核后再决定是否通过。
+  {% if card.duplicate_suspect.source_url %}<a href="{{ card.duplicate_suspect.source_url }}">查看该卡片来源</a>{% endif %}
+</section>
+{% endif %}
+
 <section class="grid-two detail-grid" data-card-id="{{ card.id }}">
   <div class="panel">
     <div class="panel-head">
@@ -67,6 +74,20 @@
       <div class="report-rendered">{{ review_note.preview_html | safe }}</div>
       {% else %}
       <p class="muted">还没有单卡审核建议。</p>
+      {% endif %}
+    </div>
+
+    <div class="review-note">
+      <h2>知识脉络</h2>
+      {% if foundational_concepts %}
+      <p class="subtle">读懂这张卡片，建议先理解以下基础概念：</p>
+      <div class="concept-chip-list">
+        {% for concept in foundational_concepts %}
+        <span class="concept-chip" title="{{ concept.category_label }}">{{ concept.name_zh }}</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">未匹配到关联的基础概念。</p>
       {% endif %}
     </div>
 

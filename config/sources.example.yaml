@@ -1,0 +1,40 @@
+# Copy to sources.yaml for a fresh installation. Public starter sources only.
+sources:
+  arxiv:
+    enabled: true
+    track: academic
+    themes:
+    - academic-research
+    - foundation-model
+    categories:
+    - cs.AI
+    - cs.CL
+    - cs.LG
+    - cs.CV
+    - stat.ML
+    max_results_per_day: 50
+  rss:
+    enabled: true
+    feeds:
+    - name: OpenAI News
+      track: industry
+      url: https://openai.com/news/rss.xml
+      themes:
+      - general-ai
+      - foundation-model
+      - agent
+    - name: Hugging Face Blog
+      track: academic
+      url: https://huggingface.co/blog/feed.xml
+      themes:
+      - foundation-model
+      - academic-research
+    - name: 机器之心
+      track: industry
+      url: https://www.jiqizhixin.com/rss
+      themes:
+      - chinese-media
+      - general-ai
+  manual:
+    enabled: true
+    input_file: data/manual_urls.txt

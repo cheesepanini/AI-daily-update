@@ -1,0 +1,14 @@
+{
+  "description": "Fixed debugging snapshot; generated summaries are not verified facts. No PPT materials or production database.",
+  "card_count": 120,
+  "statuses": {
+    "accepted": 62,
+    "needs-review": 6,
+    "rejected": 52
+  },
+  "related_records": {
+    "data/feedback/events.jsonl": 97,
+    "data/features/cards.jsonl": 18
+  },
+  "source_collected_date_range": "2026-07-06 to 2026-09-20"
+}

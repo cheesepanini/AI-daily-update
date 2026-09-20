@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from ai_daily_update.storage import db
@@ -23,11 +25,15 @@ def generate_brief(
     topics: list[str] | None,
     audience: str,
     date_basis: str = "collected",
+    llm_client: Any | None = None,
 ) -> Path:
     connection = db.connect(sqlite_path)
     rows = db.query_cards(connection, from_date, to_date, topics, audience, date_basis=date_basis)
     connection.close()
     items = [brief_item_from_row(row) for row in rows]
+    if llm_client and getattr(llm_client, "available", False) and items:
+        groups = cluster_brief_items_with_llm(items, llm_client)
+        items = [merge_brief_item_group(group) for group in groups]
     title = TITLES.get(audience, "AI 简报")
     basis_label = "收集/入库日期" if date_basis == "collected" else "事件/发布日期"
     lines = [
@@ -133,6 +139,110 @@ def brief_item_from_row(row) -> dict[str, str]:
             fallback="后续关注来源更新、复现材料和实际应用反馈。",
         ),
     }
+
+
+def cluster_brief_items_with_llm(
+    items: list[dict[str, str]], llm_client: Any | None
+) -> list[list[dict[str, str]]]:
+    """Group brief items that report the same underlying event, via LLM.
+
+    Falls back to one group per item (current no-op behavior) whenever the
+    LLM is unavailable or its response can't be parsed, so callers never
+    silently merge items based on a guess.
+    """
+    if llm_client and getattr(llm_client, "available", False):
+        prompt = build_brief_clustering_prompt(items)
+        try:
+            content = llm_client.generate_card_content(prompt)
+        except Exception:
+            content = None
+        indices = parse_brief_clustering_response(content, len(items))
+        if indices:
+            return [[items[i] for i in group] for group in indices]
+    return [[item] for item in items]
+
+
+def build_brief_clustering_prompt(items: list[dict[str, str]]) -> str:
+    payload = {
+        "items": [
+            {
+                "index": index,
+                "title": item["title"],
+                "conclusion": item["conclusion"],
+                "topics": item["topics"],
+            }
+            for index, item in enumerate(items)
+        ]
+    }
+    return (
+        "你是中文 AI 简报编辑。请把下面这些条目按是否报道同一件事进行分组，"
+        "只有当多条条目讲的其实是同一个事件、同一个模型发布或同一个结论时才合并为一组；"
+        "只是话题相关但具体事件不同的条目，应该分成不同组。\n"
+        "要求：\n"
+        "1. 只输出 JSON，不要 Markdown，不要解释。\n"
+        '2. 输出格式为 {"groups":[{"indices":[0,1]}]}，indices 是输入条目的 index。\n'
+        "3. 每个条目必须且只能出现在一个分组中。\n"
+        "4. 不确定是否为同一事件时，应该分为不同组，而不是合并。\n\n"
+        f"输入 JSON：\n{json.dumps(payload, ensure_ascii=False)}"
+    )
+
+
+def parse_brief_clustering_response(content: str | None, item_count: int) -> list[list[int]] | None:
+    if not content:
+        return None
+    text = content.strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("groups"), list):
+        return None
+    valid_indices = set(range(item_count))
+    groups: list[list[int]] = []
+    seen: set[int] = set()
+    for entry in parsed["groups"]:
+        if not isinstance(entry, dict):
+            continue
+        indices = []
+        for raw_index in entry.get("indices", []):
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                continue
+            if index in valid_indices and index not in seen:
+                indices.append(index)
+        if not indices:
+            continue
+        seen.update(indices)
+        groups.append(sorted(indices))
+    missing = sorted(valid_indices - seen)
+    groups.extend([[index] for index in missing])
+    return groups or None
+
+
+def merge_brief_item_group(group: list[dict[str, str]]) -> dict[str, str]:
+    if len(group) == 1:
+        return group[0]
+    primary = group[0]
+    merged = dict(primary)
+    other_sources = [
+        f"[{item['source_label']}]({item['source_url']})" for item in group[1:] if item["source_url"]
+    ]
+    if other_sources:
+        merged["overview"] = f"{primary['overview']} 另有 {len(other_sources)} 家来源报道同一事件：" + "、".join(
+            other_sources
+        )
+    return merged
 
 
 def build_core_judgement(items: list[dict[str, str]], audience: str) -> str:

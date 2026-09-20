@@ -30,6 +30,7 @@
           <a href="{{ card.detail_url }}">{{ card.title }}</a>
           <div class="subtle">{{ card.event_overview }}</div>
           {% if card.source_url %}<div class="subtle"><a href="{{ card.source_url }}">原始来源：{{ card.source_label }}</a></div>{% endif %}
+          {% if card.duplicate_suspect %}<div class="warning">疑似重复：与「{{ card.duplicate_suspect.title }}」（{{ card.duplicate_suspect.date }}）可能报道同一事件，请复核</div>{% endif %}
         </td>
         <td data-label="通道">{{ card.track_label }}</td>
         <td data-label="状态"><span class="status {{ card.status }}" data-card-status-label>{{ card.status_label }}</span></td>

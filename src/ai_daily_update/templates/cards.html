@@ -94,6 +94,7 @@
             <div class="subtle">{{ card.title_en }}</div>
             {% if card.conclusion %}<div class="subtle">{{ card.conclusion }}</div>{% endif %}
             {% if card.source_url %}<div class="subtle"><a href="{{ card.source_url }}">原始来源：{{ card.source_label }}</a></div>{% endif %}
+            {% if card.duplicate_suspect %}<div class="warning">疑似重复：与「{{ card.duplicate_suspect.title }}」（{{ card.duplicate_suspect.date }}）可能报道同一事件，请复核</div>{% endif %}
           </td>
           <td data-label="主题">{{ ", ".join(card.topics) }}</td>
           <td data-label="通道">{{ card.track_label }}</td>

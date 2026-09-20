@@ -1,0 +1,9 @@
+{
+  "appId": "fun.cheesepanini.aidailyupdate",
+  "appName": "AI Daily Update",
+  "webDir": "www",
+  "server": {
+    "url": "https://ai.cheesepanini.fun",
+    "androidScheme": "https"
+  }
+}

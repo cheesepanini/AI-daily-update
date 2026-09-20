@@ -606,6 +606,95 @@ hr {
   align-items: end;
 }
 
+.brief-toolbar {
+  margin-bottom: 24px;
+}
+
+.brief-toolbar h1 {
+  letter-spacing: -0.02em;
+}
+
+.brief-toolbar .muted {
+  max-width: 620px;
+  margin: 7px 0 0;
+  line-height: 1.6;
+}
+
+.brief-composer {
+  position: relative;
+  overflow: hidden;
+  border-color: #c9d9d4;
+  background: linear-gradient(135deg, #ffffff 0%, #f3faf7 100%);
+}
+
+.brief-composer::after {
+  position: absolute;
+  top: -72px;
+  right: -56px;
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  background: rgba(15, 118, 110, 0.07);
+  content: "";
+  pointer-events: none;
+}
+
+.brief-composer > * {
+  position: relative;
+  z-index: 1;
+}
+
+.section-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.brief-source-note,
+.brief-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid #b9d7cf;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #17665f;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.brief-count {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.brief-composer .brief-form {
+  padding: 15px;
+  border: 1px solid rgba(185, 215, 207, 0.78);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.brief-form input:not(:disabled),
+.brief-form select {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.brief-submit {
+  min-width: 112px;
+  font-weight: 700;
+  box-shadow: 0 5px 12px rgba(15, 118, 110, 0.18);
+}
+
+.brief-composer .subtle {
+  margin: 11px 2px 0;
+  line-height: 1.55;
+}
+
 .brief-form label,
 .deck-upload-form label {
   display: grid;
@@ -664,8 +753,131 @@ hr {
 }
 
 .brief-item {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: 0 4px 13px rgba(15, 23, 42, 0.035);
+}
+
+.brief-item-head {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  justify-content: flex-end;
+  background: #fafcfb;
+  padding: 0 9px 0 16px;
+}
+
+.brief-item-head form {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.brief-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.brief-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 66px;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.brief-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.brief-summary-copy {
   display: grid;
-  gap: 10px;
+  min-width: 0;
+  gap: 3px;
+}
+
+.brief-summary-copy strong {
+  overflow: hidden;
+  color: #15322f;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-summary-copy span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-expand-label {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.brief-expand-label::before {
+  content: "展开全文";
+}
+
+.brief-details[open] summary {
+  border-bottom: 1px solid #e8ece9;
+}
+
+.brief-details[open] .brief-expand-label::before {
+  content: "收起";
+}
+
+.danger-button {
+  min-height: 27px;
+  border-color: transparent;
+  background: transparent;
+  color: #a33a3a;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.danger-button:hover {
+  border-color: #f0caca;
+  background: #fff4f4;
+}
+
+.brief-details .report-rendered {
+  max-height: 620px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  padding: 20px 22px;
+}
+
+.brief-details .report-rendered h1 {
+  color: #15322f;
+  font-size: 20px;
+  letter-spacing: -0.015em;
+}
+
+.brief-details .report-rendered h2 {
+  margin-top: 22px;
+  border-top-color: #e5ece9;
+}
+
+.brief-job-panel {
+  border-color: #bddcd5;
+  background: #f7fcfa;
+}
+
+.brief-job-panel .job-logs {
+  border-left: 2px solid #a7d8cd;
+  padding-left: 12px;
 }
 
 .review-card {
@@ -1126,6 +1338,22 @@ hr {
 .usage-list {
   display: grid;
   gap: 8px;
+}
+
+.concept-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.concept-chip {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--accent-2);
+  background: #fbfcfb;
 }
 
 .usage-item {

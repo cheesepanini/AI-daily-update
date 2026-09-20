@@ -49,6 +49,7 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
+cp config/sources.example.yaml config/sources.yaml
 ```
 
 日常进入环境：
@@ -176,7 +177,7 @@ ss -ltnp '( sport = :8001 )'
 当前基线：
 
 ```text
-114 passed
+198 passed
 ```
 
 ## 工作台流程
@@ -713,3 +714,11 @@ ssh aliyun-ai
 7. 后续本地训练偏好模型
 8. 再进入下一轮开发
 ```
+
+## 协作与调试样例
+
+仓库提供 [固定调试样例](examples/demo-data/README.md)，可在独立目录重建索引，复现卡片浏览、审核、关联检索和反馈处理。请按样例说明启动，避免覆盖现有运行数据。
+
+完整 data/、notes/、ppt/ 及 .env 保留在各自运行环境，不随代码提交。PPT 讲稿、配置和备份不上传；PPT 功能源代码继续维护。实验性的 nettest/ 和根目录课程大纲原件仅保留本地。Android 客户端见 [mobile-app/README.md](mobile-app/README.md)。
+
+提交前运行 `python -m pytest`，并检查 `git diff --cached --stat`，确认不包含本机凭据或构建产物。现有部署文档包含原环境的路径和地址，使用时请替换为自己的配置。

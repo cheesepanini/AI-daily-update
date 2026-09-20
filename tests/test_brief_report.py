@@ -1,6 +1,15 @@
+import json
+
 from ai_daily_update.reports.brief import generate_brief
 from ai_daily_update.storage.indexer import rebuild_index
 from ai_daily_update.storage.markdown import write_card
+
+
+class FakeClusteringLLM:
+    available = True
+
+    def generate_card_content(self, prompt):
+        return json.dumps({"groups": [{"indices": [0, 1]}]})
 
 
 def test_generate_brief_uses_card_content_sections(tmp_path) -> None:
@@ -76,3 +85,101 @@ def test_generate_brief_creates_unique_paths_for_same_range(tmp_path) -> None:
 
     assert first.name == "2026-07-06_to_2026-07-07_collected_all.md"
     assert second.name == "2026-07-06_to_2026-07-07_collected_all-2.md"
+
+
+def test_generate_brief_merges_duplicate_items_via_llm_clustering(tmp_path) -> None:
+    markdown_root = tmp_path / "notes"
+    write_card(
+        markdown_root / "cards" / "2026" / "07" / "card-a.md",
+        {
+            "id": "card-a",
+            "track": "industry",
+            "title_zh": "某模型发布（媒体 A 报道）",
+            "title_en": "Model launch (outlet A)",
+            "date": "2026-07-06",
+            "source_url": "https://a.example.com/news",
+            "topics": ["ai-industry"],
+            "entities": [],
+            "review_status": "accepted",
+        },
+        "## 一句话结论\n某公司发布了新模型。\n",
+    )
+    write_card(
+        markdown_root / "cards" / "2026" / "07" / "card-b.md",
+        {
+            "id": "card-b",
+            "track": "industry",
+            "title_zh": "某模型发布（媒体 B 报道）",
+            "title_en": "Model launch (outlet B)",
+            "date": "2026-07-06",
+            "source_url": "https://b.example.com/news",
+            "topics": ["ai-industry"],
+            "entities": [],
+            "review_status": "accepted",
+        },
+        "## 一句话结论\n某公司发布了新模型。\n",
+    )
+    sqlite_path = tmp_path / "data" / "kb.sqlite"
+    rebuild_index(markdown_root, sqlite_path)
+
+    output_path = generate_brief(
+        sqlite_path,
+        markdown_root,
+        "2026-07-06",
+        "2026-07-06",
+        None,
+        "industry",
+        llm_client=FakeClusteringLLM(),
+    )
+
+    text = output_path.read_text(encoding="utf-8")
+    assert text.count("### ") == 1
+    assert "另有 1 家来源报道同一事件" in text
+
+
+def test_generate_brief_without_llm_client_keeps_items_separate(tmp_path) -> None:
+    markdown_root = tmp_path / "notes"
+    write_card(
+        markdown_root / "cards" / "2026" / "07" / "card-a.md",
+        {
+            "id": "card-a",
+            "track": "industry",
+            "title_zh": "某模型发布（媒体 A 报道）",
+            "title_en": "Model launch (outlet A)",
+            "date": "2026-07-06",
+            "source_url": "https://a.example.com/news",
+            "topics": ["ai-industry"],
+            "entities": [],
+            "review_status": "accepted",
+        },
+        "## 一句话结论\n某公司发布了新模型。\n",
+    )
+    write_card(
+        markdown_root / "cards" / "2026" / "07" / "card-b.md",
+        {
+            "id": "card-b",
+            "track": "industry",
+            "title_zh": "某模型发布（媒体 B 报道）",
+            "title_en": "Model launch (outlet B)",
+            "date": "2026-07-06",
+            "source_url": "https://b.example.com/news",
+            "topics": ["ai-industry"],
+            "entities": [],
+            "review_status": "accepted",
+        },
+        "## 一句话结论\n某公司发布了新模型。\n",
+    )
+    sqlite_path = tmp_path / "data" / "kb.sqlite"
+    rebuild_index(markdown_root, sqlite_path)
+
+    output_path = generate_brief(
+        sqlite_path,
+        markdown_root,
+        "2026-07-06",
+        "2026-07-06",
+        None,
+        "industry",
+    )
+
+    text = output_path.read_text(encoding="utf-8")
+    assert text.count("### ") == 2

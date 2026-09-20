@@ -1,0 +1,332 @@
+# 基础概念清单，取自《人工智能导论》课程大纲（2026版·32学时版），
+# 用于将知识卡片的前沿内容映射到读者需要先理解的基础概念。
+# category 对应大纲的章节结构，可直接按教材目录调整/扩充。
+category_labels:
+  intro: 绪论（AI 发展脉络与技术流派）
+  math-foundations: 人工智能数学基础
+  ml-basics: 机器学习基础
+  deep-learning-advanced: 深度学习新方法
+  generative-ai: 人工智能生成内容
+  agent-systems: 智能体系统
+  ai-practice: 人工智能实践
+  ai-frontier: 人工智能前沿技术
+
+concepts:
+  ai-schools-of-thought:
+    name_zh: 人工智能三大技术流派（符号主义/连接主义/行为主义）
+    name_en: Symbolism, Connectionism & Behaviorism
+    category: intro
+    aliases:
+      - 符号主义
+      - 连接主义
+      - 行为主义
+      - symbolism
+      - connectionism
+      - behaviorism
+    applies_to_topics: [foundation-model, ai-industry]
+  ai-development-history:
+    name_zh: 人工智能发展脉络
+    name_en: History of AI Development
+    category: intro
+    aliases:
+      - 达特茅斯会议
+      - dartmouth
+      - ai winter
+      - 人工智能寒冬
+    applies_to_topics: [ai-industry]
+
+  regression-classification:
+    name_zh: 回归与分类问题
+    name_en: Regression & Classification
+    category: math-foundations
+    aliases:
+      - linear regression
+      - logistic regression
+      - softmax
+      - sigmoid
+      - 回归问题
+      - 分类问题
+    applies_to_topics: [foundation-model]
+  gradient-descent-optimization:
+    name_zh: 梯度下降与优化方法
+    name_en: Gradient Descent & Optimization
+    category: math-foundations
+    aliases:
+      - gradient descent
+      - 梯度下降
+      - optimization algorithm
+    applies_to_topics: [foundation-model]
+  generalization-regularization:
+    name_zh: 泛化与正则化
+    name_en: Generalization & Regularization
+    category: math-foundations
+    aliases:
+      - overfitting
+      - underfitting
+      - regularization
+      - 过拟合
+      - 欠拟合
+      - 正则化
+    applies_to_topics: [foundation-model, benchmark-evaluation]
+
+  classical-statistical-learning:
+    name_zh: 经典统计学习（逻辑回归/支持向量机/决策树/K-means）
+    name_en: Classical Statistical Learning
+    category: ml-basics
+    aliases:
+      - support vector machine
+      - svm
+      - decision tree
+      - k-means
+      - 支持向量机
+      - 决策树
+    applies_to_topics: [foundation-model]
+  neural-network-basics:
+    name_zh: 神经网络基础与反向传播
+    name_en: Neural Network Basics & Backpropagation
+    category: ml-basics
+    aliases:
+      - neural network
+      - 神经网络
+      - backpropagation
+      - 反向传播
+      - multilayer perceptron
+      - activation function
+    applies_to_topics: [foundation-model, generative-model]
+  mainstream-network-architectures:
+    name_zh: 主流神经网络结构（CNN/RNN/Transformer/图神经网络）
+    name_en: Mainstream Network Architectures
+    category: ml-basics
+    aliases:
+      - convolutional neural network
+      - cnn
+      - recurrent neural network
+      - rnn
+      - transformer
+      - graph neural network
+      - 卷积神经网络
+      - 循环神经网络
+      - 图神经网络
+    applies_to_topics: [foundation-model, spatial-intelligence]
+  reinforcement-learning-basics:
+    name_zh: 强化学习基础
+    name_en: Reinforcement Learning Basics
+    category: ml-basics
+    aliases:
+      - reinforcement learning
+      - 强化学习
+      - reward function
+      - value function
+      - q-learning
+      - policy gradient
+    applies_to_topics: [intelligent-game, agent]
+  multi-agent-reinforcement-learning:
+    name_zh: 多智能体强化学习与博弈
+    name_en: Multi-Agent RL & Game Theory
+    category: ml-basics
+    aliases:
+      - multi-agent
+      - 多智能体
+      - game theory
+      - 博弈论
+    applies_to_topics: [intelligent-game]
+
+  self-supervised-learning:
+    name_zh: 自监督学习
+    name_en: Self-Supervised Learning
+    category: deep-learning-advanced
+    aliases:
+      - self-supervised learning
+      - 自监督学习
+      - contrastive learning
+      - 对比学习
+      - masked modeling
+      - 掩码学习
+    applies_to_topics: [self-supervised-learning]
+  model-transfer-finetuning:
+    name_zh: 模型迁移与微调
+    name_en: Model Transfer & Fine-Tuning
+    category: deep-learning-advanced
+    aliases:
+      - fine-tuning
+      - 模型微调
+      - pretrain
+      - 预训练
+      - transfer learning
+      - 迁移学习
+    applies_to_topics: [foundation-model]
+  model-compression:
+    name_zh: 模型轻量化（量化/剪枝/知识蒸馏）
+    name_en: Model Compression
+    category: deep-learning-advanced
+    aliases:
+      - quantization
+      - 模型量化
+      - pruning
+      - 模型剪枝
+      - knowledge distillation
+      - 知识蒸馏
+      - kv cache
+    applies_to_topics: [ai-compute, foundation-model]
+  distributed-training:
+    name_zh: 分布式训练与混合精度训练
+    name_en: Distributed & Mixed-Precision Training
+    category: deep-learning-advanced
+    aliases:
+      - distributed training
+      - 分布式训练
+      - data parallel
+      - model parallel
+      - mixed precision
+      - 混合精度
+      - fsdp
+    applies_to_topics: [ai-compute]
+  model-interpretability:
+    name_zh: 深度学习模型可解释性
+    name_en: Model Interpretability
+    category: deep-learning-advanced
+    aliases:
+      - interpretability
+      - 可解释性
+      - explainability
+    applies_to_topics: [foundation-model]
+
+  generative-models-basics:
+    name_zh: 生成模型基础（GAN/VAE/扩散模型/自回归模型）
+    name_en: Generative Model Basics
+    category: generative-ai
+    aliases:
+      - generative adversarial network
+      - gan
+      - variational autoencoder
+      - vae
+      - diffusion model
+      - 扩散模型
+      - autoregressive model
+      - 生成对抗网络
+    applies_to_topics: [generative-model]
+  large-language-models:
+    name_zh: 大语言模型与 Transformer 架构
+    name_en: Large Language Models & Transformer
+    category: generative-ai
+    aliases:
+      - large language model
+      - llm
+      - transformer
+      - 大语言模型
+      - scaling law
+      - mixture of experts
+      - moe
+    applies_to_topics: [foundation-model]
+  llm-alignment-prompting:
+    name_zh: 模型对齐与提示工程
+    name_en: Model Alignment & Prompt Engineering
+    category: generative-ai
+    aliases:
+      - rlhf
+      - 模型对齐
+      - prompt engineering
+      - 提示工程
+      - chain of thought
+      - 思维链
+      - retrieval augmented generation
+      - rag
+    applies_to_topics: [foundation-model]
+  multimodal-llm:
+    name_zh: 多模态大语言模型
+    name_en: Multimodal LLM
+    category: generative-ai
+    aliases:
+      - multimodal
+      - 多模态
+      - vision-language model
+      - 视觉语言
+    applies_to_topics: [foundation-model, spatial-intelligence]
+
+  agent-definition-architecture:
+    name_zh: 智能体定义与单智能体架构
+    name_en: Agent Definition & Single-Agent Architecture
+    category: agent-systems
+    aliases:
+      - agent
+      - 智能体
+      - ai agent
+      - 智能体架构
+      - task planning
+      - 任务规划
+    applies_to_topics: [agent]
+  multi-agent-collaboration:
+    name_zh: 多智能体系统与协作机制
+    name_en: Multi-Agent Systems & Collaboration
+    category: agent-systems
+    aliases:
+      - multi-agent system
+      - 多智能体系统
+      - agent collaboration
+      - 多智能体协作
+    applies_to_topics: [agent]
+
+  ai-development-pipeline:
+    name_zh: 人工智能开发与部署流程
+    name_en: AI Development & Deployment Pipeline
+    category: ai-practice
+    aliases:
+      - model deployment
+      - 模型部署
+      - training pipeline
+    applies_to_topics: [ai-compute, ai-industry]
+
+  embodied-intelligence:
+    name_zh: 具身智能与智能无人系统
+    name_en: Embodied Intelligence & Unmanned Systems
+    category: ai-frontier
+    aliases:
+      - embodied ai
+      - 具身智能
+      - unmanned system
+      - 无人系统
+      - humanoid robot
+      - 人形机器人
+    applies_to_topics: [spatial-intelligence]
+  ai-for-science:
+    name_zh: AI 驱动科学研究
+    name_en: AI for Science
+    category: ai-frontier
+    aliases:
+      - ai for science
+      - ai4science
+      - protein structure
+      - 蛋白质
+      - drug discovery
+      - 药物发现
+    applies_to_topics: [ai4science]
+  ai-safety-privacy:
+    name_zh: 人工智能安全与隐私
+    name_en: AI Safety & Privacy
+    category: ai-frontier
+    aliases:
+      - adversarial attack
+      - 对抗攻击
+      - data privacy
+      - 数据隐私
+    applies_to_topics: [ai-policy]
+  ai-ethics-governance:
+    name_zh: 人工智能伦理与治理
+    name_en: AI Ethics & Governance
+    category: ai-frontier
+    aliases:
+      - ai ethics
+      - 人工智能伦理
+      - ai governance
+      - ai治理
+      - regulation
+    applies_to_topics: [ai-policy]
+  artificial-general-intelligence:
+    name_zh: 通用人工智能
+    name_en: Artificial General Intelligence
+    category: ai-frontier
+    aliases:
+      - agi
+      - artificial general intelligence
+      - 通用人工智能
+    applies_to_topics: [foundation-model, ai-policy]

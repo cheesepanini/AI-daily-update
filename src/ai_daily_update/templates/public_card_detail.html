@@ -28,5 +28,17 @@
   </div>
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
 </section>
+
+{% if foundational_concepts %}
+<section class="panel">
+  <h2>理解这张卡片需要的基础概念</h2>
+  <p class="muted">这些是《人工智能导论》等课程会教授的基础概念，理解它们有助于读懂上面的前沿内容。</p>
+  <div class="concept-chip-list">
+    {% for concept in foundational_concepts %}
+    <span class="concept-chip">{{ concept.name_zh }}</span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endif %}
 {% endblock %}

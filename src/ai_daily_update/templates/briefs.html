@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="toolbar">
+<section class="toolbar brief-toolbar">
   <div>
     <h1>简报生成</h1>
     <p class="muted">从已接受卡片生成本日、本周或指定时间段的 Markdown 简报。</p>
@@ -8,27 +8,30 @@
   <a class="button-link" href="/">返回工作台</a>
 </section>
 
-<section class="panel">
+<section class="panel brief-composer">
   <div class="panel-head">
-    <h2>生成新简报</h2>
-    <span class="muted">只使用 review_status 为 accepted 的卡片</span>
+    <div>
+      <p class="section-kicker">BRIEF BUILDER</p>
+      <h2>生成新简报</h2>
+    </div>
+    <span class="brief-source-note">仅使用已接受卡片</span>
   </div>
-  <form class="brief-form" method="post" action="/actions/brief">
+  <form class="brief-form" method="post" action="/actions/brief" data-brief-form data-today="{{ today }}" data-week-start="{{ week_start }}" data-week-end="{{ week_end }}">
     <label>
       <span>时间范围</span>
-      <select name="preset">
-        <option value="today">本日简报</option>
-        <option value="this_week">本周简报</option>
+      <select name="preset" data-preset>
+        <option value="today">每日简报</option>
+        <option value="this_week">每周简报</option>
         <option value="custom">自定义时间段</option>
       </select>
     </label>
-    <label>
+    <label data-date-field>
       <span>开始日期</span>
-      <input type="date" name="from_date" value="{{ today }}">
+      <input type="date" name="from_date" value="{{ today }}" data-from-date>
     </label>
-    <label>
+    <label data-date-field>
       <span>结束日期</span>
-      <input type="date" name="to_date" value="{{ today }}">
+      <input type="date" name="to_date" value="{{ today }}" data-to-date>
     </label>
     <label>
       <span>简报类型</span>
@@ -50,24 +53,50 @@
       <span>Topic 过滤</span>
       <input type="text" name="topics" placeholder="可选，多个 topic 用英文逗号分隔">
     </label>
-    <button class="primary" type="submit">生成简报</button>
+    <button class="primary brief-submit" type="submit">生成简报</button>
   </form>
   <p class="subtle">本周范围按当前时区计算：{{ week_start }} 至 {{ week_end }}。默认按收集/入库日期生成工作日简报，也可切换为事件/发布日期。</p>
 </section>
 
-<section class="panel">
+<section class="panel job-panel brief-job-panel" id="brief-job-panel" hidden>
   <div class="panel-head">
-    <h2>最近简报</h2>
+    <h2>生成进度</h2>
+    <span class="status" id="brief-job-status"></span>
+  </div>
+  <p><strong id="brief-job-label"></strong></p>
+  <p class="muted" id="brief-job-step"></p>
+  <ul class="job-logs" id="brief-job-logs"></ul>
+</section>
+
+<section class="panel brief-history">
+  <div class="panel-head">
+    <div>
+      <p class="section-kicker">RECENT OUTPUT</p>
+      <h2>最近简报</h2>
+      <p class="subtle">最新生成的简报会优先显示。</p>
+    </div>
+    {% if briefs %}<span class="brief-count">{{ briefs | length }} 份</span>{% endif %}
   </div>
   {% if briefs %}
   <div class="brief-list">
     {% for brief in briefs %}
     <article class="brief-item">
-      <div class="brief-meta">
-        <strong>{{ brief.name }}</strong>
-        <code>{{ brief.path }}</code>
+      <div class="brief-item-head">
+        <details class="brief-details">
+          <summary>
+            <span class="brief-summary-copy">
+              <strong>{{ brief.title }}</strong>
+              <span>{{ brief.excerpt }}</span>
+            </span>
+            <span class="brief-expand-label" aria-hidden="true"></span>
+          </summary>
+          <div class="report-rendered">{{ brief.preview_html | safe }}</div>
+        </details>
+        <form method="post" action="/actions/delete-brief" onsubmit="return confirm('确认删除这份简报？删除后无法恢复。')">
+          <input type="hidden" name="brief_id" value="{{ brief.id }}">
+          <button class="danger-button" type="submit">删除</button>
+        </form>
       </div>
-      <div class="report-rendered">{{ brief.preview_html | safe }}</div>
     </article>
     {% endfor %}
   </div>
@@ -75,4 +104,142 @@
   <p class="muted">还没有生成简报。</p>
   {% endif %}
 </section>
+
+<script>
+  (() => {
+    const form = document.querySelector("[data-brief-form]");
+    if (!form) return;
+    const preset = form.querySelector("[data-preset]");
+    const fromDate = form.querySelector("[data-from-date]");
+    const toDate = form.querySelector("[data-to-date]");
+    const dateFields = form.querySelectorAll("[data-date-field]");
+
+    function syncDateFields() {
+      const locked = preset.value !== "custom";
+      if (preset.value === "today") {
+        fromDate.value = form.dataset.today;
+        toDate.value = form.dataset.today;
+      } else if (preset.value === "this_week") {
+        fromDate.value = form.dataset.weekStart;
+        toDate.value = form.dataset.weekEnd;
+      }
+      fromDate.disabled = locked;
+      toDate.disabled = locked;
+      dateFields.forEach((field) => field.classList.toggle("is-disabled", locked));
+    }
+
+    preset.addEventListener("change", syncDateFields);
+    syncDateFields();
+
+    const panel = document.getElementById("brief-job-panel");
+    const status = document.getElementById("brief-job-status");
+    const label = document.getElementById("brief-job-label");
+    const step = document.getElementById("brief-job-step");
+    const logs = document.getElementById("brief-job-logs");
+    let startedBriefJob = false;
+
+    async function requestJson(url, options) {
+      const response = await fetch(url, options);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        if (response.redirected && new URL(response.url).pathname === "/briefs") {
+          throw new Error("服务端尚未重启到新版简报任务接口，请重启 Web 服务后再试。");
+        }
+        if (response.redirected && new URL(response.url).pathname === "/login") {
+          throw new Error("登录状态已失效，请重新登录后再试。");
+        }
+        throw new Error("服务器返回了非预期页面，请刷新后重试。");
+      }
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "请求失败，请稍后重试。");
+      return payload;
+    }
+
+    function showRequestError(error) {
+      panel.hidden = false;
+      status.textContent = "failed";
+      label.textContent = "生成简报";
+      step.textContent = error.message || "无法获取生成进度。";
+    }
+
+    function renderJob(job) {
+      if (!job || !job.id) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      status.textContent = job.status || "";
+      label.textContent = job.label || "";
+      step.textContent = job.step || "";
+      logs.innerHTML = "";
+      for (const log of job.logs || []) {
+        const item = document.createElement("li");
+        item.textContent = log;
+        logs.appendChild(item);
+      }
+    }
+
+    async function refreshBriefJob(jobId) {
+      let job;
+      try {
+        job = await requestJson(`/jobs/${jobId}`);
+      } catch (error) {
+        showRequestError(error);
+        return;
+      }
+      renderJob(job);
+      if (job.status === "running" || job.status === "queued") {
+        setTimeout(() => refreshBriefJob(jobId), 2000);
+      } else if (startedBriefJob && job.status === "complete") {
+        startedBriefJob = false;
+        window.location.reload();
+      } else {
+        setTimeout(refreshLatestBriefJob, 15000);
+      }
+    }
+
+    async function refreshLatestBriefJob() {
+      let job;
+      try {
+        job = await requestJson("/jobs/latest?job_type=brief");
+      } catch (error) {
+        showRequestError(error);
+        return;
+      }
+      if (!job.id) {
+        panel.hidden = true;
+        setTimeout(refreshLatestBriefJob, 15000);
+        return;
+      }
+      renderJob(job);
+      if (job.status === "running" || job.status === "queued") {
+        setTimeout(() => refreshBriefJob(job.id), 2000);
+      } else {
+        setTimeout(refreshLatestBriefJob, 15000);
+      }
+    }
+
+    refreshLatestBriefJob();
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type='submit']");
+      button.disabled = true;
+      try {
+        const payload = await requestJson(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: {"X-Requested-With": "fetch"}
+        });
+        startedBriefJob = true;
+        renderJob(payload.job);
+        setTimeout(() => refreshBriefJob(payload.job_id), 1000);
+      } catch (error) {
+        showRequestError(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  })();
+</script>
 {% endblock %}

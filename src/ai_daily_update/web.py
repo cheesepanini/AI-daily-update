@@ -33,6 +33,7 @@ from ai_daily_update.api.schemas import (
     PublicMetaResponse,
 )
 from ai_daily_update.config import Settings, load_settings
+from ai_daily_update.processors.concepts import match_foundational_concepts
 from ai_daily_update.feedback.events import append_feedback_event, feedback_log_path, read_feedback_events
 from ai_daily_update.preference.features import (
     SURFACES,
@@ -146,6 +147,11 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
             return await call_next(request)
         if auth_session_valid(request, settings):
             return await call_next(request)
+        if request.headers.get("x-requested-with") == "fetch":
+            return JSONResponse(
+                {"error": "登录状态已失效，请重新登录后再试。"},
+                status_code=401,
+            )
         return RedirectResponse("/login", status_code=303)
 
 
@@ -359,6 +365,9 @@ def create_app(root: Path | None = None) -> FastAPI:
                 "card": item,
                 "content_html": markdown_renderer.render(card.content),
                 "is_admin": auth_session_valid(request, settings),
+                "foundational_concepts": match_foundational_concepts(
+                    card.metadata, card.content, settings.concepts
+                ),
             },
         )
 
@@ -588,6 +597,7 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "status_label": STATUS_LABELS.get(status, status),
                     "topics": metadata.get("topics", []),
                     "source_url": metadata.get("source_url", ""),
+                    "duplicate_suspect": metadata.get("duplicate_suspect"),
                     "path": path,
                 },
                 "content_html": markdown_renderer.render(card.content),
@@ -596,6 +606,9 @@ def create_app(root: Path | None = None) -> FastAPI:
                 ),
                 "navigation": adjacent_card_navigation(settings, str(metadata.get("id", path.stem))),
                 "ppt_usage": card_ppt_usage(settings, str(metadata.get("id", path.stem))),
+                "foundational_concepts": match_foundational_concepts(
+                    metadata, card.content, settings.concepts
+                ),
             },
         )
 
@@ -858,13 +871,14 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.post("/actions/brief")
     def action_brief(
+        request: Request,
         preset: str = Form(default="today"),
         from_date: str = Form(default=""),
         to_date: str = Form(default=""),
         topics: str = Form(default=""),
         audience: str = Form(default="academic"),
         date_basis: str = Form(default="collected"),
-    ) -> RedirectResponse:
+    ):
         today = today_in_timezone(settings.timezone)
         if preset == "today":
             start = today
@@ -878,15 +892,29 @@ def create_app(root: Path | None = None) -> FastAPI:
         if end < start:
             start, end = end, start
         topic_list = [topic.strip() for topic in topics.split(",") if topic.strip()]
+        if request.headers.get("x-requested-with") == "fetch":
+            job_id = start_brief_job(
+                root=settings.root,
+                from_date=start.isoformat(),
+                to_date=end.isoformat(),
+                topics=topic_list,
+                audience=audience,
+                date_basis=date_basis,
+            )
+            return JSONResponse({"job_id": job_id, "job": job_snapshot(job_id)})
+
+        from ai_daily_update.cli import _llm_client
         generate_brief(
-            settings.sqlite_path,
-            settings.markdown_root,
-            start.isoformat(),
-            end.isoformat(),
-            topic_list or None,
-            audience,
-            date_basis=date_basis,
+            settings.sqlite_path, settings.markdown_root, start.isoformat(), end.isoformat(),
+            topic_list or None, audience, date_basis=date_basis, llm_client=_llm_client(settings),
         )
+        return RedirectResponse("/briefs", status_code=303)
+
+    @app.post("/actions/delete-brief")
+    def action_delete_brief(brief_id: str = Form(default="")) -> RedirectResponse:
+        path = brief_path_for_id(settings.markdown_root, brief_id)
+        if path is not None:
+            path.unlink(missing_ok=True)
         return RedirectResponse("/briefs", status_code=303)
 
     @app.post("/actions/ppt-plan")
@@ -1385,6 +1413,7 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "public_detail_url": f"/public/cards/{metadata.get('id', path.stem)}",
         "topics": metadata.get("topics", []),
         "score_fields": score_fields(metadata),
+        "duplicate_suspect": metadata.get("duplicate_suspect"),
     }
 
 
@@ -1691,16 +1720,52 @@ def latest_briefs(
     briefs_root = markdown_root / "briefs"
     if not briefs_root.exists():
         return []
-    paths = sorted(briefs_root.rglob("*.md"), reverse=True)[:limit]
+    paths = sorted(
+        briefs_root.rglob("*.md"),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )[:limit]
     briefs = []
     for path in paths:
-        item = {"name": path.name, "path": str(path)}
+        relative_path = path.relative_to(briefs_root).as_posix()
+        item: dict[str, str] = {"id": brief_id_for_relative_path(relative_path)}
         if with_preview:
             text = path.read_text(encoding="utf-8")
             preview = "\n".join(text.splitlines()[:120])
+            item.update(brief_list_summary(text))
             item["preview_html"] = markdown_renderer.render(preview)
         briefs.append(item)
     return briefs
+
+
+def brief_list_summary(text: str) -> dict[str, str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    title = next((line.lstrip("#").strip() for line in lines if line.startswith("#")), "简报内容")
+    excerpt = next(
+        (
+            line.lstrip("- ").strip()
+            for line in lines
+            if not line.startswith("#") and not line.startswith("-") and len(line) > 8
+        ),
+        "点击查看本期简报内容。",
+    )
+    return {"title": title, "excerpt": excerpt[:96]}
+
+
+def brief_id_for_relative_path(relative_path: str) -> str:
+    return hashlib.sha256(relative_path.encode("utf-8")).hexdigest()
+
+
+def brief_path_for_id(markdown_root: Path, brief_id: str) -> Path | None:
+    """Resolve an opaque brief ID without accepting a client-supplied path."""
+    briefs_root = markdown_root / "briefs"
+    if not brief_id or not briefs_root.exists():
+        return None
+    for path in briefs_root.rglob("*.md"):
+        relative_path = path.relative_to(briefs_root).as_posix()
+        if hmac.compare_digest(brief_id, brief_id_for_relative_path(relative_path)):
+            return path
+    return None
 
 
 def ppt_node_overview(settings: Settings, deck: PPTDeck) -> dict[str, Any]:
@@ -3458,6 +3523,59 @@ def start_ppt_plan_job(
     thread = threading.Thread(target=run_ppt_plan_job, args=(job_id,), daemon=True)
     thread.start()
     return job_id
+
+
+def start_brief_job(
+    root: Path, from_date: str, to_date: str, topics: list[str], audience: str, date_basis: str
+) -> str:
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "label": "生成简报",
+        "status": "queued",
+        "step": "已加入后台任务队列",
+        "root": str(root),
+        "from_date": from_date,
+        "to_date": to_date,
+        "topics": topics,
+        "audience": audience,
+        "date_basis": date_basis,
+        "job_type": "brief",
+        "logs": [],
+    }
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+    threading.Thread(target=run_brief_job, args=(job_id,), daemon=True).start()
+    return job_id
+
+
+def run_brief_job(job_id: str) -> None:
+    try:
+        from ai_daily_update.cli import _llm_client
+
+        snapshot = job_snapshot(job_id)
+        settings = load_settings(Path(str(snapshot.get("root") or Path.cwd())))
+        job_update(job_id, status="running", step="正在筛选已接受卡片")
+        job_log(job_id, f"时间范围：{snapshot.get('from_date')} 至 {snapshot.get('to_date')}")
+        topics = snapshot.get("topics") or []
+        if topics:
+            job_log(job_id, f"Topic 过滤：{', '.join(str(topic) for topic in topics)}")
+        job_update(job_id, step="正在生成简报内容")
+        output_path = generate_brief(
+            settings.sqlite_path,
+            settings.markdown_root,
+            str(snapshot.get("from_date")),
+            str(snapshot.get("to_date")),
+            list(topics) or None,
+            str(snapshot.get("audience", "academic")),
+            date_basis=str(snapshot.get("date_basis", "collected")),
+            llm_client=_llm_client(settings),
+        )
+        job_update(job_id, status="complete", step="已完成")
+        job_log(job_id, "简报已生成，可在下方查看内容。")
+    except Exception as exc:
+        job_update(job_id, status="failed", step=f"失败：{exc}")
+        job_log(job_id, traceback.format_exc(limit=4))
 
 
 def run_ppt_plan_job(job_id: str) -> None:
