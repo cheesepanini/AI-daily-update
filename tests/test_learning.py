@@ -134,6 +134,25 @@ def test_chat_uses_only_accepted_news(tmp_path, monkeypatch):
     assert unrelated.json()["sources"] == []
 
 
+def test_chat_resolves_english_term_to_reviewed_concept(tmp_path, monkeypatch):
+    setup_site(tmp_path)
+    path = tmp_path / "content" / "learning" / "catalog.json"
+    path.write_text(json.dumps({"complete": True, "items": [item("智能体定义与类型"), item("智能体系统")]}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_reply(self, instructions, prompt):
+        if "仅从列表中选出" in instructions:
+            return '["智能体定义与类型"]'
+        assert "智能体定义与类型" in prompt
+        return "智能体能感知环境并采取行动。[1]"
+
+    monkeypatch.setattr("ai_daily_update.web.OpenAIClient.generate_learning_reply", fake_reply)
+    response = TestClient(create_app(tmp_path)).post("/api/v1/learning/chat", json={"message": "agent是什么"})
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["title"] == "智能体定义与类型"
+    assert "智能体能感知环境" in response.json()["answer"]
+
+
 def test_learning_rejects_oversized_known_id(tmp_path):
     client = setup_site(tmp_path)
     response = client.post("/api/v1/learning/plan", json={"goal_text": "张量", "known_ids": ["x" * 121]})

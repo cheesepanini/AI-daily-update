@@ -514,6 +514,8 @@ def create_app(root: Path | None = None) -> FastAPI:
         for _, card in news_cards:
             matches.extend(item for item in learning_card_recommendations(learning_catalog, card.metadata) if item not in matches)
         matches.extend(item for item in search_items(learning_catalog, query, limit=5) if item not in matches)
+        if not matches and re.search(r"[A-Za-z]{2,}", body.message):
+            matches = map_custom_goal_with_llm(settings, learning_catalog, body.message)
         matches = matches[:5]
         sources = [{"ref": str(i + 1), "id": item["id"], "type": "textbook", "title": item["title"], "source_section": item["source_section"], "url": f"/learn/concepts/{item['id']}"} for i, item in enumerate(matches)]
         for i, (news, _) in enumerate(news_cards):
