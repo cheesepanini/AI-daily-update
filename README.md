@@ -1,5 +1,9 @@
 # AI 消息速览
 
+教材知识库与对话学习的审核、导出和上线流程见 [docs/learning.md](docs/learning.md)。
+
+管理员登录后可在“模型配置”页修改 DeepSeek 模型名称和 API 密钥；密钥只保存在服务器私有的 `.env` 中。
+
 AI 消息速览是一个本地优先的 AI 信息采集、审核、知识卡片、简报和 PPT 更新辅助系统。
 
 当前推荐工作流是：
@@ -62,9 +66,7 @@ cd /home/lsh/Documents/AI-daily-update
 `.env` 至少需要包含：
 
 ```env
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=...
-OPENAI_MODEL=...
+DEEPSEEK_API_KEY=...
 
 AI_DAILY_ADMIN_USERNAME=...
 AI_DAILY_ADMIN_PASSWORD=...

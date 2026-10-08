@@ -29,15 +29,32 @@
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
 </section>
 
-{% if foundational_concepts %}
+{% if foundational_concepts and not request.app.state.learning_ready %}
 <section class="panel">
   <h2>理解这张卡片需要的基础概念</h2>
-  <p class="muted">这些是《人工智能导论》等课程会教授的基础概念，理解它们有助于读懂上面的前沿内容。</p>
+  <p class="muted">这些是《人工智能导论》等课程会教授的基础概念。教材知识页仍在审核，当前仅展示名称，暂时不能点开；审核发布后会显示可点击的讲解和教材位置。</p>
   <div class="concept-chip-list">
     {% for concept in foundational_concepts %}
     <span class="concept-chip">{{ concept.name_zh }}</span>
     {% endfor %}
   </div>
+</section>
+{% endif %}
+{% if request.app.state.learning_ready %}
+<section class="panel">
+  <h2>对应的教材知识点</h2>
+  {% if learning_recommendations %}
+  <p>根据卡片内容自动匹配，点击查看已审核的教材讲解：</p>
+  <div class="concept-chip-list">
+    {% for concept in learning_recommendations %}
+    <a class="concept-chip" href="/learn/concepts/{{ concept.id }}">{{ concept.title }} · 教材 {{ concept.source_section }}</a>
+    {% endfor %}
+  </div>
+  {% elif learning_match_pending %}<p class="muted">教材知识点匹配尚未完成。</p>
+  {% else %}<p class="muted">这条消息没有直接对应的教材知识点。</p>{% endif %}
+  {% if learning_news_reviewed %}
+  <p><a class="button-link" href="/learn/chat?card_id={{ card.id | urlencode }}">与学习助手讨论这条消息</a></p>
+  {% endif %}
 </section>
 {% endif %}
 {% endif %}

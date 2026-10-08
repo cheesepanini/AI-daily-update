@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from ai_daily_update.utils.config import section
 
@@ -76,6 +76,10 @@ class Settings:
 def load_settings(root: Path | None = None) -> Settings:
     base = root or Path.cwd()
     load_dotenv(base / ".env")
+    local_model_env = dotenv_values(base / ".env")
+    for name in ("AI_DAILY_LLM_MODEL", "DEEPSEEK_API_KEY"):
+        if local_model_env.get(name):
+            os.environ[name] = local_model_env[name]
     config_dir = base / "config"
     return Settings(
         root=base,

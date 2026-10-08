@@ -2042,3 +2042,7 @@ code {
     border-radius: 6px;
   }
 }
+.learning-results, .learning-chat-log { margin-top: 1rem; }
+.learning-message { border-top: 1px solid #ddd; padding: .7rem 0; white-space: pre-wrap; }
+.learning-message a { display: block; margin-top: .35rem; }
+#learning-plan-form, #learning-chat-form { display: grid; gap: .65rem; max-width: 48rem; }

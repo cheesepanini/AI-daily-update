@@ -73,3 +73,17 @@ def test_match_foundational_concepts_ranks_topic_and_alias_hits_above_alias_only
     matches = match_foundational_concepts(metadata, "", CONCEPTS_CONFIG)
 
     assert matches[0]["id"] == "reinforcement-learning-basics"
+
+
+def test_longer_alias_does_not_trigger_embedded_shorter_alias():
+    config = {"concepts": {
+        "agent": {"aliases": ["agent", "智能体"]},
+        "multi-agent": {"aliases": ["multi-agent system", "多智能体协作"]},
+    }}
+    metadata = {"title_en": "multi-agent system", "topics": []}
+    assert [item["id"] for item in match_foundational_concepts(metadata, "", config)] == ["multi-agent"]
+    metadata["title_en"] = "agent and multi-agent system"
+    assert {item["id"] for item in match_foundational_concepts(metadata, "", config)} == {"agent", "multi-agent"}
+    metadata["title_en"] = ""
+    metadata["title_zh"] = "多智能体协作"
+    assert [item["id"] for item in match_foundational_concepts(metadata, "", config)] == ["multi-agent"]

@@ -79,7 +79,20 @@
 
     <div class="review-note">
       <h2>知识脉络</h2>
-      {% if foundational_concepts %}
+      {% if request.app.state.learning_ready %}
+      {% if learning_recommendations %}
+      <p class="subtle">根据卡片内容自动匹配，点击查看已审核的教材知识点：</p>
+      <div class="concept-chip-list">
+        {% for concept in learning_recommendations %}
+        <a class="concept-chip" href="/learn/concepts/{{ concept.id }}">{{ concept.title }} · 教材 {{ concept.source_section }}</a>
+        {% endfor %}
+      </div>
+      {% elif learning_match_pending %}
+      <p class="muted">教材知识点匹配尚未完成。</p>
+      {% else %}
+      <p class="muted">这条消息没有直接对应的教材知识点。</p>
+      {% endif %}
+      {% elif foundational_concepts %}
       <p class="subtle">读懂这张卡片，建议先理解以下基础概念：</p>
       <div class="concept-chip-list">
         {% for concept in foundational_concepts %}

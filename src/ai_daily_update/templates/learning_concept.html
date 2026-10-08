@@ -1,0 +1,17 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="panel" data-learning-id="{{ item.id }}">
+  <p><a href="/learn">← 返回学习路径</a></p>
+  <h1>{{ item.title }}</h1>
+  <p class="muted">教材《人工智能导论》{{ item.source_section }} · 已审核</p>
+  <h2>通俗解释</h2><p>{{ item.explanation }}</p>
+  <h2>例子</h2><p>{{ item.example }}</p>
+  <h2>容易混淆</h2><p>{{ item.misconception }}</p>
+  <h2>检查理解</h2><p>{{ item.question }}</p>
+  <details><summary>查看参考答案</summary><p>{{ item.answer }}</p></details>
+  <p><a class="button-link" href="/learn/chat?concept_id={{ item.id | urlencode }}">询问这个知识点</a></p>
+  <p><button id="learning-mark-read" type="button">标记已读</button> <button id="learning-mark-verified" type="button">我已答对</button></p>
+  <p id="learning-progress-state" aria-live="polite"></p>
+</section>
+<script src="/static/learning.js?v=20261008-1" defer></script>
+{% endblock %}

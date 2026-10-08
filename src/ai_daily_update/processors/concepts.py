@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,9 +46,26 @@ def match_foundational_concepts(
     text = f"{metadata.get('title_zh', '')} {metadata.get('title_en', '')} {content}".lower()
     category_labels = concepts_config.get("category_labels", {}) or {}
 
+    concepts = load_foundational_concepts(concepts_config)
+    occurrences = [
+        (concept.id, alias.lower(), match.start(), match.end())
+        for concept in concepts
+        for alias in concept.aliases if alias
+        for match in re.finditer(re.escape(alias.lower()), text)
+    ]
+    matched: dict[str, set[str]] = {}
+    # ponytail: News text is short; compare spans directly unless profiling shows a cost.
+    for concept_id, alias, start, end in occurrences:
+        if any(
+            len(other) > len(alias) and start < other_end and other_start < end
+            for _, other, other_start, other_end in occurrences
+        ):
+            continue
+        matched.setdefault(concept_id, set()).add(alias)
+
     scored: list[tuple[int, FoundationalConcept]] = []
-    for concept in load_foundational_concepts(concepts_config):
-        alias_hits = sum(1 for alias in concept.aliases if alias.lower() in text)
+    for concept in concepts:
+        alias_hits = len(matched.get(concept.id, ()))
         if alias_hits <= 0:
             continue
         score = alias_hits * 3 + len(card_topics.intersection(concept.applies_to_topics)) * 2

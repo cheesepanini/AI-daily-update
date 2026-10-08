@@ -18,6 +18,7 @@ from ai_daily_update.collectors.rss import feeds_from_settings, fetch_all_rss_fe
 from ai_daily_update.collectors.web_page import SourceDocument, fetch_source_document
 from ai_daily_update.config import Settings, load_settings
 from ai_daily_update.feedback.events import append_feedback_event
+from ai_daily_update.learning import choose_news_concepts_with_llm, load_catalog
 from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
@@ -86,9 +87,10 @@ def _settings() -> Settings:
 def _llm_client(settings: Settings) -> OpenAIClient:
     llm_config = settings.app.get("llm", {})
     return OpenAIClient(
-        model=llm_config.get("model") or os.getenv("OPENAI_MODEL", ""),
+        model=os.getenv("AI_DAILY_LLM_MODEL") or llm_config.get("model") or os.getenv("OPENAI_MODEL", ""),
         api_key_env=llm_config.get("api_key_env", "OPENAI_API_KEY"),
         base_url=llm_config.get("base_url") or os.getenv("OPENAI_BASE_URL") or None,
+        reasoning_effort=llm_config.get("reasoning_effort") or None,
     )
 
 
@@ -441,6 +443,9 @@ def _run_daily_pipeline_locked(
         return
 
     llm = _llm_client(settings)
+    learning_catalog = load_catalog(settings.root) if settings.app.get("learning", {}).get("enabled") else {"complete": False}
+    if len(learning_catalog.get("items", [])) != int(settings.app.get("learning", {}).get("expected_count", 1)):
+        learning_catalog["complete"] = False
     created = 0
     skipped = len(duplicate_existing)
     generation_candidates = candidates_for_generation(candidates)
@@ -489,6 +494,9 @@ def _run_daily_pipeline_locked(
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
             if content_from_llm and llm.available:
                 metadata.update(score_card_quality_with_llm(metadata, content, llm))
+                concept_ids = choose_news_concepts_with_llm(learning_catalog, metadata, content, llm)
+                if concept_ids is not None:
+                    metadata["learning_concept_ids"] = concept_ids
             card_day = date.fromisoformat(str(metadata["date"]))
             path = card_path(settings.markdown_root, card_day, metadata["id"])
             if path.exists():

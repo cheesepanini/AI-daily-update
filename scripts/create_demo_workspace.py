@@ -32,7 +32,7 @@ def main():
     env = destination / ".env"
     with env.open("x", encoding="utf-8") as handle:
         env.chmod(0o600)
-        handle.write("OPENAI_API_KEY=\nOPENAI_BASE_URL=\nOPENAI_MODEL=\n"
+        handle.write("DEEPSEEK_API_KEY=\n"
                      "AI_DAILY_ADMIN_USERNAME=demo\n"
                      f"AI_DAILY_ADMIN_PASSWORD={secrets.token_urlsafe(18)}\n"
                      f"AI_DAILY_SESSION_SECRET={secrets.token_urlsafe(32)}\n")

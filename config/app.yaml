@@ -24,16 +24,22 @@ storage:
   sqlite_path: data/kb.sqlite
 
 llm:
-  provider: openai
-  model: ${OPENAI_MODEL}
-  api_key_env: OPENAI_API_KEY
-  base_url: ${OPENAI_BASE_URL}
+  provider: deepseek
+  model: deepseek-flash
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com
+  reasoning_effort: none
+
+learning:
+  enabled: true
+  expected_count: 287
 
 ppt:
   llm_polish: true
 
 auth:
   enabled: true
+  cookie_secure: ${AI_DAILY_COOKIE_SECURE}
   username: ${AI_DAILY_ADMIN_USERNAME}
   password: ${AI_DAILY_ADMIN_PASSWORD}
   session_secret: ${AI_DAILY_SESSION_SECRET}
