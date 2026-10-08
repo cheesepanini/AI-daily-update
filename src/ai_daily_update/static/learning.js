@@ -14,7 +14,7 @@
   const post = async (url, body) => {
     const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "服务暂时不可用");
+    if (!response.ok) throw new Error({ model_unverified: "回答缺少可靠的资料引用，请重试。", model_failed: "回答生成失败，请稍后重试。" }[data.error] || data.error || "服务暂时不可用");
     return data;
   };
 

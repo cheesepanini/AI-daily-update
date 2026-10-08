@@ -140,11 +140,13 @@ def test_chat_resolves_english_term_to_reviewed_concept(tmp_path, monkeypatch):
     path.write_text(json.dumps({"complete": True, "items": [item("智能体定义与类型"), item("智能体系统")]}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
+    replies = iter(["智能体能感知环境并采取行动。", "智能体能感知环境并采取行动。[1]"])
+
     def fake_reply(self, instructions, prompt):
         if "仅从列表中选出" in instructions:
             return '["智能体定义与类型"]'
         assert "智能体定义与类型" in prompt
-        return "智能体能感知环境并采取行动。[1]"
+        return next(replies)
 
     monkeypatch.setattr("ai_daily_update.web.OpenAIClient.generate_learning_reply", fake_reply)
     response = TestClient(create_app(tmp_path)).post("/api/v1/learning/chat", json={"message": "agent是什么"})
