@@ -1,22 +1,34 @@
 {% extends "public_base.html" %}
 {% block content %}
-<section class="panel">
-  <h1>知识点问答</h1>
-  <p>围绕一个具体知识点提问，学习助手会依据已审核教材讲解并列出引用。想先确定学习方向，可查看<a href="/learn">学习目标与路径</a>。</p>
-  <p class="muted">问题及检索到的已审核资料会发送给网站配置的大模型服务；对话记录只保存在当前浏览器。</p>
-  <label for="concept-search">查找教材知识点</label>
-  <input id="concept-search" type="search" placeholder="例如：梯度下降、指令微调">
-  <div id="concept-results" class="learning-results" aria-live="polite"></div>
+<section class="panel learning-chat-page">
+  <div class="learning-chat-heading">
+    <div>
+      <h1>知识点问答</h1>
+      <p>围绕具体问题提问，结合已审核教材获得讲解与引用。也可以先查看<a href="/learn">学习目标与路径</a>。</p>
+    </div>
+    <button id="learning-clear" type="button">清除记录</button>
+  </div>
+  <div class="learning-chat-tools">
+    <div>
+      <label for="concept-search">查找教材知识点</label>
+      <input id="concept-search" type="search" placeholder="例如：梯度下降、指令微调">
+      <div id="concept-results" class="learning-results" aria-live="polite"></div>
+    </div>
+    <div>
+      <label for="learning-depth">讲解深度</label>
+      <select id="learning-depth"><option value="plain">通俗解释</option><option value="technical">技术细节</option></select>
+    </div>
+  </div>
   <p id="learning-news-context" class="muted"></p>
-  <label for="learning-depth">讲解深度</label>
-  <select id="learning-depth"><option value="plain">通俗解释</option><option value="technical">技术细节</option></select>
-  <div id="learning-chat-log" class="learning-chat-log" aria-live="polite"></div>
+  <div id="learning-chat-log" class="learning-chat-log" role="log" aria-live="polite"></div>
   <form id="learning-chat-form">
     <label for="learning-message">具体知识点或问题</label>
     <textarea id="learning-message" maxlength="1200" rows="3" required placeholder="例如：梯度下降为什么需要学习率？"></textarea>
-    <button type="submit">发送</button>
+    <div class="learning-composer-footer">
+      <span class="muted">对话记录只保存在当前浏览器；问题和检索资料会发送给网站配置的模型。</span>
+      <button id="learning-send" class="primary" type="submit">发送问题</button>
+    </div>
   </form>
-  <button id="learning-clear" type="button">清除对话记录</button>
 </section>
-<script src="/static/learning.js?v=20261008-1" defer></script>
+<script src="/static/learning.js?v=20261008-2" defer></script>
 {% endblock %}

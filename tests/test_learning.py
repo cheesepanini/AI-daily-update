@@ -79,6 +79,7 @@ def test_learning_is_closed_until_enabled(tmp_path):
     assert client.get("/learn").status_code == 404
     assert client.get("/learn/chat").status_code == 404
     assert client.post("/api/v1/learning/chat", json={"message": "张量是什么"}).status_code == 404
+    assert client.post("/api/v1/learning/render", json={"messages": ["**张量**"]}).status_code == 404
 
 
 def test_learning_plan_is_public_with_admin_login_enabled(tmp_path):
@@ -88,6 +89,9 @@ def test_learning_plan_is_public_with_admin_login_enabled(tmp_path):
     response = client.post("/api/v1/learning/plan", json={"goal_text": "梯度下降"})
     assert response.status_code == 200
     assert response.json()["steps"]
+    rendered = client.post("/api/v1/learning/render", json={"messages": ["**重点**"]})
+    assert rendered.status_code == 200
+    assert "<strong>重点</strong>" in rendered.json()["html"][0]
 
 
 def test_chat_uses_only_accepted_news(tmp_path, monkeypatch):
@@ -152,6 +156,26 @@ def test_invalid_model_goal_mapping_does_not_crash(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("ai_daily_update.web.OpenAIClient.generate_learning_reply", lambda self, instructions, prompt: '[{"id": "concept:张量"}]')
     assert map_custom_goal_with_llm(load_settings(tmp_path), {"items": [item("张量")]}, "学张量") == []
+
+
+def test_custom_agent_goal_accepts_reviewed_concept_titles(tmp_path, monkeypatch):
+    setup_site(tmp_path)
+    path = tmp_path / "content" / "learning" / "catalog.json"
+    path.write_text(json.dumps({"complete": True, "items": [item("智能体系统"), item("任务规划与工具调用")]}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ai_daily_update.web.OpenAIClient.generate_learning_reply", lambda self, instructions, prompt: '["智能体系统", "任务规划与工具调用"]')
+    response = TestClient(create_app(tmp_path)).post("/api/v1/learning/plan", json={"goal_text": "想要自己搭一个agent"})
+    assert [step["title"] for step in response.json()["steps"]] == ["智能体系统", "任务规划与工具调用"]
+
+
+def test_learning_markdown_renders_formatting_without_raw_html(tmp_path):
+    client = setup_site(tmp_path)
+    response = client.post("/api/v1/learning/render", json={"messages": ["## 步骤\n\n- **第一步**：运行 `python`", "<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n\n![remote](https://example.com/a.png)"]})
+    assert response.status_code == 200
+    html = response.json()["html"]
+    assert "<h2>步骤</h2>" in html[0] and "<strong>第一步</strong>" in html[0]
+    assert "<script>" not in html[1] and 'href="javascript:' not in html[1]
+    assert "<img" not in html[1]
 
 
 def test_public_source_link_requires_http_scheme():

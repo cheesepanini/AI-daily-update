@@ -29,6 +29,7 @@ from ai_daily_update.api.public import public_card_summary
 from ai_daily_update.api.schemas import (
     ApiError,
     LearningChatRequest,
+    LearningMarkdownRequest,
     LearningPlanRequest,
     Pagination,
     PublicCardDetail,
@@ -67,6 +68,7 @@ from ai_daily_update.utils.dates import now_iso, today_in_timezone
 PACKAGE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
 markdown_renderer = MarkdownIt("commonmark", {"html": False}).enable("table")
+learning_markdown_renderer = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
 
 STATUS_LABELS = {
     "needs-review": "待审核",
@@ -145,8 +147,8 @@ def map_custom_goal_with_llm(settings: Settings, catalog: dict[str, Any], goal: 
         return []
     if not isinstance(ids, list):
         return []
-    valid = {item["id"]: item for item in concepts}
-    return [valid[item_id] for item_id in ids[:3] if isinstance(item_id, str) and item_id in valid]
+    valid = {key: item for item in concepts for key in (item["id"], item["title"])}
+    return list({valid[value]["id"]: valid[value] for value in ids[:3] if isinstance(value, str) and value in valid}.values())
 
 
 def learning_news_cards(settings: Settings, query: str, card_id: str = "") -> list[tuple[dict[str, Any], Any]]:
@@ -292,7 +294,7 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
             or path.startswith("/api/v1/learning/concepts/")
         ):
             return await call_next(request)
-        if request.method == "POST" and path in {"/api/v1/learning/plan", "/api/v1/learning/chat"}:
+        if request.method == "POST" and path in {"/api/v1/learning/plan", "/api/v1/learning/chat", "/api/v1/learning/render"}:
             return await call_next(request)
         if auth_session_valid(request, settings):
             return await call_next(request)
@@ -543,6 +545,12 @@ def create_app(root: Path | None = None) -> FastAPI:
         if not cited or not cited.issubset(valid):
             return JSONResponse({"error": "model_unverified"}, status_code=503)
         return {"answer": answer, "followup": matches[0].get("question", "你还想了解哪个相关概念？") if matches else "你还想了解哪个相关概念？", "sources": sources}
+
+    @app.post("/api/v1/learning/render")
+    def learning_render(body: LearningMarkdownRequest):
+        if not learning_ready:
+            return JSONResponse({"error": "learning_unavailable"}, status_code=404)
+        return {"html": [learning_markdown_renderer.render(message) for message in body.messages]}
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):

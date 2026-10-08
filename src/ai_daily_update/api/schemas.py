@@ -76,3 +76,7 @@ class LearningChatRequest(BaseModel):
     depth: str = Field(default="plain", max_length=20)
     card_id: str = Field(default="", max_length=200)
     history: list[LearningHistoryTurn] = Field(default_factory=list, max_length=12)
+
+
+class LearningMarkdownRequest(BaseModel):
+    messages: list[Annotated[str, Field(max_length=6000)]] = Field(max_length=20)

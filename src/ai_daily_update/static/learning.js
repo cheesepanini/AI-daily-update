@@ -8,6 +8,7 @@
   const $ = (id) => document.getElementById(id);
   const note = (parent, text) => { const p = document.createElement("p"); p.textContent = text; parent.appendChild(p); };
   const link = (parent, label, href) => {
+    if (typeof href !== "string" || (!(href.startsWith("/") && !href.startsWith("//")) && !/^https?:\/\//i.test(href))) return;
     const a = document.createElement("a"); a.textContent = label; a.href = href; parent.appendChild(a);
   };
   const post = async (url, body) => {
@@ -77,30 +78,55 @@
     if (params.get("concept_id")) $("learning-message").value = `请解释「${params.get("concept_id").replace(/^concept:/, "")}」，并举一个例子。`;
     const renderHistory = () => {
       const log = $("learning-chat-log"); log.replaceChildren();
+      if (!state.history.length) {
+        const empty = document.createElement("p"); empty.className = "learning-empty";
+        empty.textContent = "从一个具体问题开始，例如“智能体如何调用工具？”"; log.appendChild(empty);
+      }
+      const answers = [];
       for (const entry of state.history) {
-        const block = document.createElement("div"); block.className = "learning-message";
-        note(block, (entry.role === "user" ? "你：" : "学习助手：") + entry.content);
-        for (const source of entry.sources || []) {
-          link(block, `[${source.ref}] ${source.type === "news" ? "消息" : "教材"}：${source.title}${source.date ? `（${source.date}）` : ""}`, source.url);
+        const block = document.createElement("article"); block.className = `learning-message ${entry.role === "user" ? "user" : "assistant"}`;
+        const label = document.createElement("span"); label.className = "learning-role";
+        label.textContent = entry.role === "user" ? "你" : "学习助手"; block.appendChild(label);
+        const content = document.createElement("div"); content.className = "learning-markdown";
+        content.textContent = entry.content; block.appendChild(content);
+        if (entry.role === "assistant") answers.push([content, entry.content]);
+        if (entry.followup) {
+          const followup = document.createElement("p"); followup.className = "learning-followup";
+          followup.textContent = `检查理解：${entry.followup}`; block.appendChild(followup);
         }
+        const sources = document.createElement("div"); sources.className = "learning-sources";
+        for (const source of entry.sources || []) {
+          link(sources, `[${source.ref}] ${source.type === "news" ? "消息" : "教材"}：${source.title}${source.date ? `（${source.date}）` : ""}`, source.url);
+        }
+        if (sources.childElementCount) block.appendChild(sources);
         log.appendChild(block);
       }
+      if (answers.length) post("/api/v1/learning/render", { messages: answers.map(([, content]) => content.slice(0, 6000)) })
+        .then(({ html }) => {
+          answers.forEach(([node], index) => { if (node.isConnected && typeof html[index] === "string") node.innerHTML = html[index]; });
+          log.scrollTop = log.scrollHeight;
+        })
+        .catch(() => {});
+      log.scrollTop = log.scrollHeight;
     };
     renderHistory();
     $("learning-chat-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const input = $("learning-message"); const message = input.value.trim(); if (!message) return;
+      const send = $("learning-send"); if (send.disabled) return; send.disabled = true;
       const prior = state.history.slice(-12).map(({ role, content }) => ({ role, content: content.slice(0, 500) }));
       state.history.push({ role: "user", content: message }); state.history = state.history.slice(-20); save(); renderHistory();
+      const pending = document.createElement("p"); pending.className = "learning-pending";
+      pending.textContent = "正在查找资料并组织回答…"; $("learning-chat-log").appendChild(pending);
       input.value = "";
       try {
         const cardId = params.get("card_id") || "";
         const data = await post("/api/v1/learning/chat", { message, depth: $("learning-depth").value, card_id: cardId, history: prior });
-        state.history.push({ role: "assistant", content: `${data.answer}\n\n检查理解：${data.followup}`, sources: data.sources });
+        state.history.push({ role: "assistant", content: data.answer, followup: data.followup, sources: data.sources });
         state.history = state.history.slice(-20); save(); renderHistory();
       } catch (error) {
         state.history.push({ role: "assistant", content: `暂时无法回答：${error.message}` }); save(); renderHistory();
-      }
+      } finally { send.disabled = false; }
     });
     $("learning-clear").addEventListener("click", () => {
       state.history = []; save(); renderHistory();
