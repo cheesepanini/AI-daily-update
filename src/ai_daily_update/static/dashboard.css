@@ -7,7 +7,8 @@
   --muted: #68737d;
   --line: #d9dedb;
   --accent: #0f766e;
-  --accent-2: #1d4ed8;
+  --accent-2: #0b635c;
+  --accent-soft: #e9f5f1;
   --warn: #8a5a00;
   --warn-bg: #fff6d8;
 }
@@ -22,6 +23,7 @@ body {
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
+  line-height: 1.5;
 }
 
 a {
@@ -43,19 +45,51 @@ a:hover {
   background: var(--surface);
 }
 
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.public-topbar .topbar-inner {
+  max-width: 1120px;
+}
+
 .brand {
   color: var(--text);
   font-weight: 700;
+  font-size: 16px;
+  white-space: nowrap;
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 4px;
 }
 
-.nav a {
+.nav a,
+.nav-form button {
   color: var(--muted);
+  white-space: nowrap;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.nav a:hover,
+.nav-form button:hover,
+.nav a[aria-current="page"] {
+  color: var(--accent-2);
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.nav a[aria-current="page"] {
+  font-weight: 700;
 }
 
 .nav-form {
@@ -68,12 +102,6 @@ a:hover {
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  padding: 0;
-}
-
-.nav-form button:hover {
-  color: var(--accent-2);
-  text-decoration: underline;
 }
 
 .login-page {
@@ -93,7 +121,7 @@ a:hover {
   display: grid;
   gap: 18px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   padding: 28px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
@@ -133,7 +161,7 @@ a:hover {
 .page {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px 24px 40px;
 }
 
 .toolbar {
@@ -142,6 +170,11 @@ a:hover {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
+}
+
+.toolbar .muted {
+  margin: 8px 0 0;
+  line-height: 1.6;
 }
 
 h1,
@@ -206,13 +239,28 @@ button,
 select,
 input,
 .button-link {
-  min-height: 36px;
+  min-height: 38px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text);
   padding: 0 12px;
   font: inherit;
+}
+
+button:hover:not(:disabled),
+.button-link:hover:not(.disabled) {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-2);
+}
+
+:is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .button-link {
@@ -266,7 +314,7 @@ button.primary {
 .stat {
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
 }
 
@@ -297,10 +345,15 @@ button.primary {
 
 .panel,
 .band {
+  min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
-  padding: 16px;
+  padding: 20px;
+}
+
+.page > .panel + .panel {
+  margin-top: 20px;
 }
 
 .band {
@@ -1552,10 +1605,15 @@ hr {
   overflow-wrap: anywhere;
 }
 
-.public-filters { align-items: center; }
-.public-filters input[type="search"] { min-width: 220px; flex: 1; }
-.public-filters input[type="date"] { width: 145px; }
-.public-check, .public-date { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.public-search-panel { margin-bottom: 20px; }
+.public-filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(130px, 1fr)); gap: 14px; align-items: end; }
+.public-filters > label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.public-filters input, .public-filters select { width: 100%; }
+.public-filters .public-check { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; color: var(--text); font-size: 14px; white-space: nowrap; }
+.public-check input { width: auto; min-height: 0; accent-color: var(--accent); }
+.public-filters .public-date { display: grid; gap: 6px; }
+.public-search-actions { display: flex; gap: 8px; }
+.public-search-actions > * { flex: 1; justify-content: center; }
 .public-reason { color: var(--muted); }
 .public-card details { font-size: 13px; }
 .public-card details ul { margin: 8px 0 0; padding-left: 20px; }
@@ -1593,6 +1651,17 @@ code {
 }
 
 @media (max-width: 900px) {
+  .topbar-inner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+  }
+
+  .nav { overflow-x: auto; }
+
+  .public-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   .toolbar,
   .topbar,
   .briefs li {
@@ -1698,6 +1767,8 @@ code {
     padding: 12px 14px;
   }
 
+  .topbar-inner { padding: 0; }
+
   .brand {
     font-size: 16px;
   }
@@ -1723,6 +1794,11 @@ code {
     color: var(--text);
     text-decoration: none;
   }
+
+  .nav a[aria-current="page"] { border-color: #badbd3; background: var(--accent-soft); color: var(--accent-2); }
+
+  .public-filters { grid-template-columns: 1fr; gap: 12px; }
+  .public-search-actions > * { width: auto; }
 
   .nav-form {
     flex: 0 0 auto;
@@ -2056,7 +2132,7 @@ code {
     border-radius: 6px;
   }
 }
-.learning-chat-page { max-width: 900px; margin: 0 auto; padding: 26px; box-shadow: 0 10px 32px rgba(20, 40, 36, .05); }
+.learning-chat-page { max-width: 900px; margin: 0 auto; }
 .learning-chat-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .learning-chat-heading h1 { margin: 0 0 8px; }
 .learning-chat-heading p { margin: 0; line-height: 1.65; color: var(--muted); }
@@ -2091,7 +2167,7 @@ code {
 .learning-markdown th, .learning-markdown td { border: 1px solid var(--line); padding: 6px 9px; text-align: left; }
 .learning-followup { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: #eef5f2; line-height: 1.6; }
 .learning-sources { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-.learning-sources a { display: inline-block; padding: 5px 8px; border-radius: 6px; background: #f0f5f9; font-size: 12px; }
+.learning-sources a { display: inline-block; padding: 5px 8px; border-radius: 6px; background: var(--accent-soft); font-size: 12px; }
 .learning-pending { margin: 0; color: var(--muted); }
 #learning-plan-form { display: grid; gap: .65rem; max-width: 48rem; }
 #learning-chat-form { display: grid; gap: 6px; }

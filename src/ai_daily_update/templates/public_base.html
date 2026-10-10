@@ -4,21 +4,29 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI消息速览</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20261010-1">
+    <link rel="stylesheet" href="/static/dashboard.css?v=20261010-2">
   </head>
   <body>
     <header class="topbar public-topbar">
-      <a class="brand" href="/public/featured">AI消息速览</a>
-      <nav class="nav">
-        <a href="/public/featured">精选</a><a href="/public">全部动态</a><a href="/public/daily">日报</a><a href="/public/topics">主题</a>
-        {% if request.app.state.learning_ready %}<a href="/learn">学习路径</a><a href="/learn/chat">知识点问答</a>{% endif %}
-        {% if is_admin %}
-        <a href="/">管理工作台</a>
-        <a href="/cards">管理卡片</a>
-        {% else %}
-        <a href="/login">管理员登录</a>
-        {% endif %}
-      </nav>
+      <div class="topbar-inner">
+        <a class="brand" href="/public/featured">AI消息速览</a>
+        <nav class="nav" aria-label="网站导航">
+          <a href="/public/featured" {% if request.url.path == '/public/featured' %}aria-current="page"{% endif %}>精选</a>
+          <a href="/public" {% if request.url.path == '/public' %}aria-current="page"{% endif %}>全部动态</a>
+          <a href="/public/daily" {% if request.url.path.startswith('/public/daily') %}aria-current="page"{% endif %}>日报</a>
+          <a href="/public/topics" {% if request.url.path.startswith('/public/topics') %}aria-current="page"{% endif %}>主题</a>
+          {% if request.app.state.learning_ready %}
+          <a href="/learn" {% if request.url.path == '/learn' or request.url.path.startswith('/learn/concepts/') %}aria-current="page"{% endif %}>学习路径</a>
+          <a href="/learn/chat" {% if request.url.path == '/learn/chat' %}aria-current="page"{% endif %}>知识点问答</a>
+          {% endif %}
+          {% if is_admin %}
+          <a href="/">管理工作台</a>
+          <a href="/cards">管理卡片</a>
+          {% else %}
+          <a href="/login">管理员登录</a>
+          {% endif %}
+        </nav>
+      </div>
     </header>
     <main class="page public-page">
       {% block content %}{% endblock %}

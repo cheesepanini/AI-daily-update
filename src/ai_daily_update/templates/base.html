@@ -4,25 +4,27 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI消息速览</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260717-1">
+    <link rel="stylesheet" href="/static/dashboard.css?v=20261010-2">
     <script src="/static/dashboard.js?v=20260709-1" defer></script>
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/">AI消息速览</a>
-      <nav class="nav">
-        <a href="/">工作台</a>
-        <a href="/cards">卡片</a>
-        <a href="/briefs">简报</a>
-        <a href="/ppt">PPT</a>
-        <a href="/sources">消息源</a>
-        <a href="/trends">趋势</a>
-        <a href="/preferences">偏好学习</a>
-        <a href="/model-settings">模型配置</a>
-        <form class="nav-form" method="post" action="/logout">
-          <button type="submit">退出</button>
-        </form>
-      </nav>
+      <div class="topbar-inner">
+        <a class="brand" href="/">AI消息速览</a>
+        <nav class="nav" aria-label="管理导航">
+          <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>工作台</a>
+          <a href="/cards" {% if request.url.path.startswith('/cards') or request.url.path == '/trash' %}aria-current="page"{% endif %}>卡片</a>
+          <a href="/briefs" {% if request.url.path == '/briefs' %}aria-current="page"{% endif %}>简报</a>
+          <a href="/ppt" {% if request.url.path == '/ppt' %}aria-current="page"{% endif %}>PPT</a>
+          <a href="/sources" {% if request.url.path == '/sources' %}aria-current="page"{% endif %}>消息源</a>
+          <a href="/trends" {% if request.url.path == '/trends' %}aria-current="page"{% endif %}>趋势</a>
+          <a href="/preferences" {% if request.url.path == '/preferences' %}aria-current="page"{% endif %}>偏好学习</a>
+          <a href="/model-settings" {% if request.url.path == '/model-settings' %}aria-current="page"{% endif %}>模型配置</a>
+          <form class="nav-form" method="post" action="/logout">
+            <button type="submit">退出</button>
+          </form>
+        </nav>
+      </div>
     </header>
     <main class="page">
       {% block content %}{% endblock %}

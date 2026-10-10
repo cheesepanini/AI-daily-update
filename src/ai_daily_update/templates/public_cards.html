@@ -5,40 +5,34 @@
     <h1>{{ '精选' if view == 'featured' else '全部动态' }}</h1>
     <p class="muted">知识卡片按事件日期排列。{% if view == 'featured' %}仅展示已审核通过的卡片。{% else %}待审核与稍后处理的内容仅供参考。{% endif %}</p>
   </div>
-  <div class="actions">
-  <form class="filters public-filters" method="get" action="{{ '/public/featured' if view == 'featured' else '/public' }}">
-    <input type="search" name="q" value="{{ q }}" placeholder="搜索标题、摘要、正文或来源" aria-label="搜索关键词">
-    <select name="search_field" aria-label="搜索范围">
+</section>
+<section class="panel public-search-panel" aria-label="筛选动态">
+  <form class="public-filters" method="get" action="{{ '/public/featured' if view == 'featured' else '/public' }}">
+    <label class="public-search-keyword">关键词<input type="search" name="q" value="{{ q }}" placeholder="搜索标题、摘要、正文或来源"></label>
+    <label>搜索范围<select name="search_field">
       {% for value, label in [('all', '全部内容'), ('title', '标题'), ('summary', '摘要'), ('body', '正文'), ('source', '来源')] %}
       <option value="{{ value }}" {% if search_field == value %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
-    </select>
-    <select name="topic" onchange="this.form.submit()">
+    </select></label>
+    <label>主题<select name="topic">
       <option value="">全部主题</option>
       {% for option in topic_options %}
       <option value="{{ option.id }}" {% if topic == option.id %}selected{% endif %}>{{ option.label }}</option>
       {% endfor %}
-    </select>
-    <select name="track" aria-label="内容通道">
+    </select></label>
+    <label>内容通道<select name="track">
       <option value="">全部通道</option>
       <option value="academic" {% if track == 'academic' %}selected{% endif %}>学术前沿</option>
       <option value="industry" {% if track == 'industry' %}selected{% endif %}>产业观察</option>
-    </select>
+    </select></label>
     <label class="public-check"><input type="checkbox" name="first_party" value="true" {% if first_party %}checked{% endif %}>只看一手</label>
     <label class="public-date">从 <input type="date" name="from_date" value="{{ from_date }}"></label>
     <label class="public-date">到 <input type="date" name="to_date" value="{{ to_date }}"></label>
-    <button type="submit">搜索</button>
-    {% if q or topic or track or first_party or from_date or to_date or search_field != 'all' %}<a class="button-link" href="{{ clear_url }}">清空</a>{% endif %}
+    <div class="public-search-actions">
+      <button class="primary" type="submit">搜索</button>
+      {% if q or topic or track or first_party or from_date or to_date or search_field != 'all' %}<a class="button-link" href="{{ clear_url }}">清空</a>{% endif %}
+    </div>
   </form>
-  <div class="pagination-actions">
-    {% if pagination.has_previous %}
-    <a class="button-link" href="{{ page_url(pagination.previous_page) }}">上一页</a>
-    {% endif %}
-    {% if pagination.has_next %}
-    <a class="button-link" href="{{ page_url(pagination.next_page) }}">下一页</a>
-    {% endif %}
-  </div>
-  </div>
 </section>
 
 <section class="panel">

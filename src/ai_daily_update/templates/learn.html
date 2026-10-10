@@ -1,8 +1,10 @@
 {% extends "public_base.html" %}
 {% block content %}
-<section class="panel">
-  <h1>学习目标与路径</h1>
-  <p>从目标出发，先看需要掌握哪些主题及建议顺序。具体知识点的疑问可到<a href="/learn/chat">知识点问答</a>中提问。</p>
+<section class="toolbar">
+  <div>
+    <h1>学习目标与路径</h1>
+    <p class="muted">从目标出发，先看需要掌握哪些主题及建议顺序。具体知识点的疑问可到<a href="/learn/chat">知识点问答</a>中提问。</p>
+  </div>
 </section>
 <section class="panel">
   <h2>规划学习方向</h2>
@@ -16,7 +18,7 @@
     <input id="learning-custom-goal" name="goal_text" maxlength="200" placeholder="例如：做一个能回答问题的 AI 应用">
     <label for="learning-background">当前基础</label>
     <select id="learning-background"><option value="beginner">刚开始了解 AI</option><option value="math">了解基础数学概念</option><option value="python">会 Python 与基础数学</option></select>
-    <button type="submit">查看路径概览</button>
+    <button class="primary" type="submit">查看路径概览</button>
   </form>
   <div id="learning-plan-result" aria-live="polite"></div>
 </section>

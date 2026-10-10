@@ -1,8 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="toolbar">
+  <div>
+    <h1>模型配置</h1>
+    <p class="muted">当前使用 DeepSeek 接口。保存后，后续新闻生成和知识点问答会使用新配置。</p>
+  </div>
+</section>
 <section class="panel">
-  <h1>模型配置</h1>
-  <p class="muted">当前使用 DeepSeek 接口。保存后，后续新闻生成和知识点问答会使用新配置。</p>
   {% if saved %}<p role="status">模型配置已保存。</p>{% endif %}
   {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/actions/model-settings" class="login-form">

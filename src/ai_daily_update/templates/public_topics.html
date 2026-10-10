@@ -1,8 +1,12 @@
 {% extends "public_base.html" %}
 {% block content %}
+<section class="toolbar">
+  <div>
+    <h1>按主题阅读</h1>
+    <p class="muted">主题数量按已审核通过的卡片统计。</p>
+  </div>
+</section>
 <section class="panel">
-  <h1>按主题阅读</h1>
-  <p class="muted">主题数量按已审核通过的卡片统计。</p>
   <div class="public-topic-grid">
     {% for topic in topics %}
     <a href="/public/topics/{{ topic.id | urlencode }}"><strong>{{ topic.label }}</strong><span>{{ counts[topic.id] }} 条精选</span></a>

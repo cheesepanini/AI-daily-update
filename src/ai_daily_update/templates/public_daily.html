@@ -10,7 +10,7 @@
     <select id="daily-day" name="day">
       {% for available_day in days %}<option value="{{ available_day }}" {% if available_day == day %}selected{% endif %}>{{ available_day }}</option>{% endfor %}
     </select>
-    <button type="submit">查看</button>
+    <button class="primary" type="submit">查看</button>
   </form>
 </section>
 <section class="panel">
