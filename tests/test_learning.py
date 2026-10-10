@@ -224,6 +224,34 @@ def test_generation_matches_only_reviewed_catalog_ids_and_page_uses_saved_match(
     assert learning_card_recommendations(catalog, {"title_zh": "张量"}) == []
 
 
+def test_generation_can_match_reviewed_microtopics_without_treating_invalid_ids_as_no_fit():
+    microtopic = {**item("向量检索"), "id": "microtopic:向量检索", "type": "microtopic"}
+    catalog = {"complete": True, "items": [item("机器学习"), microtopic]}
+
+    class FakeLLM:
+        available = True
+        response = '["向量检索", "concept:编造", "microtopic:向量检索"]'
+
+        def generate_card_content(self, prompt):
+            assert "microtopic:向量检索" in prompt
+            assert "向量检索的解释" in prompt
+            return self.response
+
+    llm = FakeLLM()
+    ids = choose_news_concepts_with_llm(catalog, {"title_zh": "向量检索新闻"}, "正文", llm)
+    assert ids == ["microtopic:向量检索"]
+    recommendations = learning_card_recommendations(catalog, {"learning_concept_ids": ids})
+    assert [item["id"] for item in recommendations] == ids
+    assert recommendations[0]["title"] == "机器学习 · 向量检索"
+    llm.response = '["concept:编造"]'
+    assert choose_news_concepts_with_llm(catalog, {}, "", llm) is None
+    catalog["items"].append({**microtopic, "id": "microtopic:另一个向量检索"})
+    llm.response = '["向量检索"]'
+    assert choose_news_concepts_with_llm(catalog, {}, "", llm) is None
+    llm.response = "[]"
+    assert choose_news_concepts_with_llm(catalog, {}, "", llm) == []
+
+
 def test_export_rejects_draft_and_missing_review_fields(tmp_path, monkeypatch):
     path = Path(__file__).resolve().parents[1] / "scripts" / "export_learning_content.py"
     spec = importlib.util.spec_from_file_location("learning_export", path)

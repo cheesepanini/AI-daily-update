@@ -2,20 +2,33 @@
 {% block content %}
 <section class="toolbar">
   <div>
-    <h1>知识卡片</h1>
-    <p class="muted">按事件日期排列，包含已接受、待审核和稍后处理的卡片。待审核内容仅供参考。</p>
+    <h1>{{ '精选' if view == 'featured' else '全部动态' }}</h1>
+    <p class="muted">知识卡片按事件日期排列。{% if view == 'featured' %}仅展示已审核通过的卡片。{% else %}待审核与稍后处理的内容仅供参考。{% endif %}</p>
   </div>
   <div class="actions">
-  <form class="filters" method="get" action="/public">
-    <input type="search" name="q" value="{{ q }}" placeholder="标题 / 结论关键词">
+  <form class="filters public-filters" method="get" action="{{ '/public/featured' if view == 'featured' else '/public' }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="搜索标题、摘要、正文或来源" aria-label="搜索关键词">
+    <select name="search_field" aria-label="搜索范围">
+      {% for value, label in [('all', '全部内容'), ('title', '标题'), ('summary', '摘要'), ('body', '正文'), ('source', '来源')] %}
+      <option value="{{ value }}" {% if search_field == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
     <select name="topic" onchange="this.form.submit()">
       <option value="">全部主题</option>
       {% for option in topic_options %}
       <option value="{{ option.id }}" {% if topic == option.id %}selected{% endif %}>{{ option.label }}</option>
       {% endfor %}
     </select>
+    <select name="track" aria-label="内容通道">
+      <option value="">全部通道</option>
+      <option value="academic" {% if track == 'academic' %}selected{% endif %}>学术前沿</option>
+      <option value="industry" {% if track == 'industry' %}selected{% endif %}>产业观察</option>
+    </select>
+    <label class="public-check"><input type="checkbox" name="first_party" value="true" {% if first_party %}checked{% endif %}>只看一手</label>
+    <label class="public-date">从 <input type="date" name="from_date" value="{{ from_date }}"></label>
+    <label class="public-date">到 <input type="date" name="to_date" value="{{ to_date }}"></label>
     <button type="submit">搜索</button>
-    {% if q or topic %}<a class="button-link" href="{{ clear_url }}">清空</a>{% endif %}
+    {% if q or topic or track or first_party or from_date or to_date or search_field != 'all' %}<a class="button-link" href="{{ clear_url }}">清空</a>{% endif %}
   </form>
   <div class="pagination-actions">
     {% if pagination.has_previous %}
@@ -42,30 +55,7 @@
 
   {% if cards %}
   <div class="public-card-list">
-    {% for card in cards %}
-    <article class="public-card">
-      <div class="public-card-date">
-        <span>事件日期</span>
-        <strong>{{ card.event_date }}</strong>
-        {% if card.info_date and card.info_date != card.event_date %}
-        <small>信息日期 {{ card.info_date }}</small>
-        {% endif %}
-      </div>
-      <div class="public-card-main">
-        <div class="public-card-title">
-          <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
-          <span class="status {{ card.status }}">{{ card.status_label }}</span>
-        </div>
-        {% if card.conclusion %}<p class="public-card-conclusion">{{ card.conclusion }}</p>{% endif %}
-        {% if card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
-        <div class="subtle">
-          {{ card.track_label }}
-          {% if card.source_label %} · 原始来源：{{ card.source_label }}{% endif %}
-          {% if card.topics %} · {{ ", ".join(card.topics) }}{% endif %}
-        </div>
-      </div>
-    </article>
-    {% endfor %}
+    {% include '_public_card_list.html' %}
   </div>
   {% else %}
   <p class="muted">暂无可展示的卡片。</p>

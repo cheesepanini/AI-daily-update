@@ -1,0 +1,18 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="panel">
+  <p><a href="/public/topics">← 返回全部主题</a></p>
+  <h1>{{ topic.label }}</h1>
+  <p class="muted">本主题的已审核通过卡片，按事件日期排列。</p>
+  {% if request.app.state.learning_ready %}
+  <p><a href="/learn">查看学习路径</a></p>
+  {% if concepts %}<h2>相关教材知识点</h2><div class="concept-chip-list">
+    {% for concept in concepts %}<a class="concept-chip" href="/learn/concepts/{{ concept.id | urlencode }}">{{ concept.title }}</a>{% endfor %}
+  </div>{% endif %}
+  {% endif %}
+</section>
+<section class="panel">
+  {% if cards %}<div class="public-card-list">{% include '_public_card_list.html' %}</div>
+  {% else %}<p class="muted">暂无已审核通过的卡片。</p>{% endif %}
+</section>
+{% endblock %}

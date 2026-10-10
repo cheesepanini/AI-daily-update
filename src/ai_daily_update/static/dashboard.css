@@ -1552,6 +1552,20 @@ hr {
   overflow-wrap: anywhere;
 }
 
+.public-filters { align-items: center; }
+.public-filters input[type="search"] { min-width: 220px; flex: 1; }
+.public-filters input[type="date"] { width: 145px; }
+.public-check, .public-date { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.public-reason { color: var(--muted); }
+.public-card details { font-size: 13px; }
+.public-card details ul { margin: 8px 0 0; padding-left: 20px; }
+.public-daily-item { border-top: 1px solid var(--line); padding: 14px 0; }
+.public-daily-item h2 { margin: 0 0 8px; font-size: 18px; }
+.public-daily-item p { margin: 8px 0; line-height: 1.6; }
+.public-topic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.public-topic-grid a { display: flex; justify-content: space-between; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 12px; }
+.public-topic-grid span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
 .public-detail-meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

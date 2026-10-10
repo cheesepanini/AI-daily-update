@@ -207,8 +207,15 @@ def learning_card_recommendations(catalog: dict[str, Any], metadata: dict[str, A
     stored_ids = metadata.get("learning_concept_ids")
     if not isinstance(stored_ids, list):
         return []
-    return [item for item_id in stored_ids if isinstance(item_id, str)
-            if (item := item_by_id(catalog, item_id)) and item["type"] == "concept"]
+    parents = {item["source_section"]: item["title"] for item in catalog["items"] if item["type"] == "concept"}
+    results = []
+    for item_id in stored_ids:
+        item = item_by_id(catalog, item_id) if isinstance(item_id, str) else None
+        if not item or item["type"] not in {"concept", "microtopic"}:
+            continue
+        parent = parents.get(item["source_section"].split(" / ")[0]) if item["type"] == "microtopic" else None
+        results.append({**item, "title": f"{parent} · {item['title']}"} if parent and parent != item["title"] else item)
+    return results
 
 
 def safe_return_to(value: str, default: str) -> str:
@@ -662,8 +669,67 @@ def create_app(root: Path | None = None) -> FastAPI:
         )
 
     @app.get("/public", response_class=HTMLResponse)
-    def public_cards_view(request: Request, page: int = 1, topic: str = "", q: str = "") -> HTMLResponse:
-        return public_cards_response(request, settings, page=page, topic=topic, q=q)
+    def public_cards_view(
+        request: Request, page: int = 1, topic: str = "", q: str = "",
+        search_field: str = "all", track: str = "", first_party: bool = False,
+        from_date: str = "", to_date: str = "",
+    ) -> HTMLResponse:
+        return public_cards_response(
+            request, settings, page=page, topic=topic, q=q, search_field=search_field,
+            track=track, first_party=first_party, from_date=from_date, to_date=to_date,
+        )
+
+    @app.get("/public/featured", response_class=HTMLResponse)
+    def public_featured_view(
+        request: Request, page: int = 1, topic: str = "", q: str = "",
+        search_field: str = "all", track: str = "", first_party: bool = False,
+        from_date: str = "", to_date: str = "",
+    ) -> HTMLResponse:
+        return public_cards_response(
+            request, settings, page=page, topic=topic, q=q, search_field=search_field,
+            track=track, first_party=first_party, from_date=from_date, to_date=to_date,
+            view="featured",
+        )
+
+    @app.get("/public/daily", response_class=HTMLResponse)
+    def public_daily_latest(request: Request, day: str = "") -> HTMLResponse:
+        return public_daily_response(request, settings, day)
+
+    @app.get("/public/daily/{day}", response_class=HTMLResponse)
+    def public_daily_day(request: Request, day: str) -> HTMLResponse:
+        return public_daily_response(request, settings, day)
+
+    @app.get("/public/topics", response_class=HTMLResponse)
+    def public_topics(request: Request) -> HTMLResponse:
+        cards = filter_public_cards(public_cards(settings), status="accepted")
+        counts = {option["id"]: sum(option["id"] in card["topics"] for card in cards) for option in topic_options(settings.topics)}
+        return templates.TemplateResponse(request, "public_topics.html", {
+            "request": request, "topics": topic_options(settings.topics), "counts": counts,
+            "is_admin": auth_session_valid(request, settings),
+        })
+
+    @app.get("/public/topics/{topic_id}", response_class=HTMLResponse)
+    def public_topic_detail(request: Request, topic_id: str) -> HTMLResponse:
+        option = next((item for item in topic_options(settings.topics) if item["id"] == topic_id), None)
+        if option is None:
+            return HTMLResponse("主题不存在。", status_code=404)
+        cards = filter_public_cards(public_cards(settings), status="accepted", topic=topic_id)
+        concepts = []
+        if learning_ready:
+            for card in cards:
+                for concept in learning_card_recommendations(learning_catalog, read_card(card["path"]).metadata):
+                    if concept["id"] not in {item["id"] for item in concepts}:
+                        concepts.append(concept)
+                    if len(concepts) >= 8:
+                        break
+                if len(concepts) >= 8:
+                    break
+        return templates.TemplateResponse(request, "public_topic_detail.html", {
+            "request": request, "topic": option, "cards": group_public_cards(cards),
+            "concepts": concepts,
+            "topic_labels": {item["id"]: item["label"] for item in topic_options(settings.topics)},
+            "is_admin": auth_session_valid(request, settings),
+        })
 
     @app.get("/public/cards/{card_id}", response_class=HTMLResponse)
     def public_card_detail(request: Request, card_id: str) -> HTMLResponse:
@@ -698,6 +764,8 @@ def create_app(root: Path | None = None) -> FastAPI:
                 "learning_recommendations": learning_card_recommendations(learning_catalog, card.metadata) if learning_ready else [],
                 "learning_match_pending": "learning_concept_ids" not in card.metadata,
                 "learning_news_reviewed": learning_news_reviewed(card.metadata),
+                "event_sources": event_sources(item, public_cards(settings)),
+                "topic_labels": {option["id"]: option["label"] for option in topic_options(settings.topics)},
             },
         )
 
@@ -928,6 +996,8 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "topics": metadata.get("topics", []),
                     "source_url": metadata.get("source_url", ""),
                     "duplicate_suspect": metadata.get("duplicate_suspect"),
+                    "first_party": metadata.get("first_party") is True,
+                    "event_group_id": str(metadata.get("event_group_id") or ""),
                     "path": path,
                 },
                 "content_html": markdown_renderer.render(card.content),
@@ -1064,6 +1134,34 @@ def create_app(root: Path | None = None) -> FastAPI:
             )
             rebuild_index(settings.markdown_root, settings.sqlite_path)
         return RedirectResponse(safe_return_to(return_to, "/"), status_code=303)
+
+    @app.post("/actions/card-publication")
+    def action_card_publication(
+        card_id: str = Form(...),
+        first_party: str = Form(default=""),
+        related_card_id: str = Form(default=""),
+    ) -> RedirectResponse:
+        path = find_card_path_by_id(settings, card_id)
+        if path is None:
+            return RedirectResponse("/cards", status_code=303)
+        card = read_card(path)
+        target_id = related_card_id.strip()
+        group_id = ""
+        if target_id:
+            if target_id == card_id and card.metadata.get("event_group_id") == card_id:
+                group_id = card_id
+            else:
+                target_path = find_card_path_by_id(settings, target_id)
+                if not target_path or card.metadata.get("review_status") != "accepted":
+                    return RedirectResponse(f"/cards/{card_id}?group_error=1", status_code=303)
+                target = read_card(target_path)
+                if target.metadata.get("review_status") != "accepted":
+                    return RedirectResponse(f"/cards/{card_id}?group_error=1", status_code=303)
+                group_id = str(target.metadata.get("event_group_id") or target_id)
+                if not target.metadata.get("event_group_id"):
+                    update_metadata(target_path, {"event_group_id": group_id})
+        update_metadata(path, {"first_party": first_party == "true", "event_group_id": group_id})
+        return RedirectResponse(f"/cards/{card_id}", status_code=303)
 
     @app.post("/actions/delete-card")
     def action_delete_card(
@@ -1595,23 +1693,48 @@ def cards_page_url(status: str, track: str, topic: str, q: str, page: int) -> st
     return f"/cards?{query}" if query else "/cards"
 
 
-def public_page_url(topic: str, q: str, page: int) -> str:
+def public_page_url(
+    topic: str, q: str, page: int, *, view: str = "all", search_field: str = "all",
+    track: str = "", first_party: bool = False, from_date: str = "", to_date: str = "",
+) -> str:
     params = {}
     if topic:
         params["topic"] = topic
     if q:
         params["q"] = q
+    if search_field != "all":
+        params["search_field"] = search_field
+    if track:
+        params["track"] = track
+    if first_party:
+        params["first_party"] = "true"
+    if from_date:
+        params["from_date"] = from_date
+    if to_date:
+        params["to_date"] = to_date
     if page > 1:
         params["page"] = str(page)
     query = urlencode(params)
-    return f"/public?{query}" if query else "/public"
+    path = "/public/featured" if view == "featured" else "/public"
+    return f"{path}?{query}" if query else path
 
 
 def public_cards_response(
-    request: Request, settings: Settings, page: int = 1, topic: str = "", q: str = ""
+    request: Request, settings: Settings, page: int = 1, topic: str = "", q: str = "",
+    search_field: str = "all", track: str = "", first_party: bool = False,
+    from_date: str = "", to_date: str = "", view: str = "all",
 ) -> HTMLResponse:
-    items = filter_public_cards(public_cards(settings), topic=topic, q=q)
+    items = filter_public_cards(
+        public_cards(settings), status="accepted" if view == "featured" else "",
+        topic=topic, q=q, search_field=search_field, track=track,
+        first_party=first_party, from_date=from_date, to_date=to_date,
+    )
+    items = group_public_cards(items)
     paginated = paginate_items(items, page=page, page_size=20)
+    page_url = lambda target_page: public_page_url(
+        topic, q, target_page, view=view, search_field=search_field,
+        track=track, first_party=first_party, from_date=from_date, to_date=to_date,
+    )
     return templates.TemplateResponse(
         request,
         "public_cards.html",
@@ -1619,23 +1742,71 @@ def public_cards_response(
             "request": request,
             "cards": paginated["items"],
             "pagination": paginated,
-            "page_url": lambda target_page: public_page_url(topic, q, target_page),
+            "page_url": page_url,
             "topic": topic,
             "q": q,
+            "view": view,
+            "search_field": search_field,
+            "track": track,
+            "first_party": first_party,
+            "from_date": from_date,
+            "to_date": to_date,
             "topic_options": topic_options(settings.topics),
-            "clear_url": public_page_url("", "", 1),
+            "topic_labels": {option["id"]: option["label"] for option in topic_options(settings.topics)},
+            "clear_url": public_page_url("", "", 1, view=view),
             "is_admin": auth_session_valid(request, settings),
         },
     )
 
 
+def public_daily_response(request: Request, settings: Settings, day: str = "") -> HTMLResponse:
+    cards = filter_public_cards(public_cards(settings), status="accepted")
+    days = sorted({card["event_date"] for card in cards if normalize_iso_date(card["event_date"])}, reverse=True)
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+    selected = day or next((available_day for available_day in days if available_day <= today), days[0] if days else "")
+    if day and (normalize_iso_date(day) != day):
+        return HTMLResponse("日期格式应为 YYYY-MM-DD。", status_code=404)
+    daily_cards = group_public_cards([card for card in cards if card["event_date"] == selected])
+    return templates.TemplateResponse(request, "public_daily.html", {
+        "request": request, "day": selected, "days": days, "cards": daily_cards,
+        "is_admin": auth_session_valid(request, settings),
+    })
+
+
+def event_sources(card: dict[str, Any], cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    group_id = card.get("event_group_id")
+    if not group_id or card.get("status") != "accepted":
+        return []
+    return [item for item in cards if item["id"] != card["id"] and item["status"] == "accepted" and item.get("event_group_id") == group_id]
+
+
+def group_public_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for card in cards:
+        key = card.get("event_group_id") if card["status"] == "accepted" else None
+        groups.setdefault(key or card["id"], []).append(card)
+    result = []
+    for members in groups.values():
+        item = dict(members[0])
+        item["other_sources"] = members[1:]
+        result.append(item)
+    return result
+
+
 def public_cards(settings: Settings) -> list[dict[str, Any]]:
     visible_statuses = {"accepted", "needs-review", "later"}
     cards = [card for card in all_cards(settings) if card["status"] in visible_statuses]
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+
+    def sort_date(item: dict[str, Any]) -> str:
+        event_date = item.get("event_date") or ""
+        info_date = item.get("info_date") or ""
+        return info_date if event_date > today and info_date and info_date <= today else event_date or info_date
+
     return sorted(
         cards,
         key=lambda item: (
-            item.get("event_date") or item.get("info_date") or "",
+            sort_date(item),
             item.get("info_date") or "",
             item.get("id") or "",
         ),
@@ -1650,6 +1821,8 @@ def filter_public_cards(
     track: str = "",
     topic: str = "",
     q: str = "",
+    search_field: str = "all",
+    first_party: bool = False,
     from_date: str = "",
     to_date: str = "",
 ) -> list[dict[str, Any]]:
@@ -1664,7 +1837,9 @@ def filter_public_cards(
         end = ""
     if start and end and end < start:
         start, end = end, start
-    normalized_q = q.strip().lower()
+    normalized_terms = q.strip().casefold().split()
+    if search_field not in {"all", "title", "summary", "body", "source"}:
+        search_field = "all"
     filtered = cards
     if status:
         filtered = [card for card in filtered if card.get("status") == status]
@@ -1672,8 +1847,13 @@ def filter_public_cards(
         filtered = [card for card in filtered if card.get("track") == track]
     if topic:
         filtered = [card for card in filtered if topic in set(card.get("topics", []) or [])]
-    if normalized_q:
-        filtered = [card for card in filtered if normalized_q in card.get("search_text", "")]
+    if first_party:
+        filtered = [card for card in filtered if card.get("first_party")]
+    if normalized_terms:
+        filtered = [card for card in filtered if all(
+            term in card.get("search_fields", {}).get(search_field, card.get("search_text", ""))
+            for term in normalized_terms
+        )]
     if start:
         filtered = [card for card in filtered if str(card.get("event_date", "")) >= start]
     if end:
@@ -1712,18 +1892,17 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
     event_date = display_event_date(metadata)
     conclusion = extract_one_sentence_conclusion(content)
     event_overview = extract_event_overview(content) or metadata.get("title_en", "")
-    search_text = " ".join(
-        filter(
-            None,
-            [
-                metadata.get("title_zh", ""),
-                metadata.get("title_en", ""),
-                conclusion or "",
-                event_overview or "",
-                " ".join(metadata.get("topics", []) or []),
-            ],
-        )
-    ).lower()
+    source_url = safe_source_url(metadata.get("source_url", ""))
+    source = source_label(source_url)
+    reason = extract_card_section(content, "为什么重要")
+    search_fields = {
+        "title": f"{metadata.get('title_zh', '')} {metadata.get('title_en', '')}",
+        "summary": f"{conclusion or ''} {event_overview or ''} {reason}",
+        "body": content,
+        "source": f"{source} {source_url}",
+    }
+    search_fields = {key: value.casefold() for key, value in search_fields.items()}
+    search_fields["all"] = " ".join([*search_fields.values(), " ".join(metadata.get("topics", []) or [])]).casefold()
     return {
         "path": path,
         "id": metadata.get("id", path.stem),
@@ -1731,10 +1910,14 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "title_en": metadata.get("title_en", ""),
         "conclusion": conclusion,
         "event_overview": event_overview,
-        "search_text": search_text,
+        "recommendation_reason": reason,
+        "search_text": search_fields["all"],
+        "search_fields": search_fields,
         "track": metadata.get("track", ""),
         "track_label": TRACK_LABELS.get(metadata.get("track", ""), metadata.get("track", "")),
         "source_type": metadata.get("source_type", ""),
+        "first_party": metadata.get("first_party") is True,
+        "event_group_id": str(metadata.get("event_group_id") or ""),
         "status": metadata.get("review_status", ""),
         "status_label": STATUS_LABELS.get(
             metadata.get("review_status", ""), metadata.get("review_status", "")
@@ -1744,8 +1927,8 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "info_date": info_date,
         "collected_date": str(metadata.get("collected_date", metadata.get("date", ""))),
         "deleted_at": str(metadata.get("deleted_at", "")),
-        "source_url": safe_source_url(metadata.get("source_url", "")),
-        "source_label": source_label(safe_source_url(metadata.get("source_url", ""))),
+        "source_url": source_url,
+        "source_label": source,
         "detail_url": f"/cards/{metadata.get('id', path.stem)}",
         "public_detail_url": f"/public/cards/{metadata.get('id', path.stem)}",
         "topics": metadata.get("topics", []),

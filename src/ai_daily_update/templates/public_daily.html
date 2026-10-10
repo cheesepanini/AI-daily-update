@@ -1,0 +1,25 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>AI 日报{% if day %} · {{ day }}{% endif %}</h1>
+    <p class="muted">按事件日期汇集已审核通过的消息；内容随卡片审核和日期修正更新。</p>
+  </div>
+  <form class="filters" method="get" action="/public/daily">
+    <label for="daily-day">查看往期</label>
+    <select id="daily-day" name="day">
+      {% for available_day in days %}<option value="{{ available_day }}" {% if available_day == day %}selected{% endif %}>{{ available_day }}</option>{% endfor %}
+    </select>
+    <button type="submit">查看</button>
+  </form>
+</section>
+<section class="panel">
+  {% if cards %}
+  <p class="muted">本期 {{ cards | length }} 件事。点击标题可查看卡片、来源与相关知识点。</p>
+  <nav aria-label="本期目录"><ol>{% for card in cards %}<li><a href="#daily-{{ loop.index }}">{{ card.title }}</a></li>{% endfor %}</ol></nav>
+  <div class="public-card-list">
+    {% for card in cards %}<div id="daily-{{ loop.index }}">{% include '_public_daily_card.html' %}</div>{% endfor %}
+  </div>
+  {% else %}<p class="muted">这一天暂无已审核通过的卡片。</p>{% endif %}
+</section>
+{% endblock %}

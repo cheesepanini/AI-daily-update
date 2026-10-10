@@ -1,0 +1,29 @@
+{% for card in cards %}
+<article class="public-card">
+  <div class="public-card-date">
+    <span>事件日期</span>
+    <strong>{{ card.event_date }}</strong>
+    {% if card.info_date and card.info_date != card.event_date %}<small>信息日期 {{ card.info_date }}</small>{% endif %}
+  </div>
+  <div class="public-card-main">
+    <div class="public-card-title">
+      <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
+      <span class="status {{ card.status }}">{{ card.status_label }}</span>
+    </div>
+    {% if card.conclusion %}<p class="public-card-conclusion">{{ card.conclusion }}</p>{% endif %}
+    {% if not card.conclusion and card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
+    {% if card.recommendation_reason and card.status == 'accepted' %}<p class="public-reason">值得关注：{{ card.recommendation_reason | truncate(110, True, '…') }}</p>{% endif %}
+    <div class="subtle">
+      {{ card.track_label }}
+      {% if card.first_party %} · 一手来源{% endif %}
+      {% if card.source_label %} · 来源：{{ card.source_label }}{% endif %}
+      {% if card.topics %} · {% for topic in card.topics %}<a href="/public/topics/{{ topic | urlencode }}">{{ topic_labels.get(topic, topic) }}</a>{% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
+    </div>
+    {% if card.other_sources %}
+    <details><summary>另有 {{ card.other_sources | length }} 条已确认的同事件报道</summary>
+      <ul>{% for source in card.other_sources %}<li><a href="{{ source.public_detail_url }}">{{ source.source_label or source.title }}</a>：{{ source.title }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+</article>
+{% endfor %}

@@ -75,7 +75,7 @@
     });
     const params = new URLSearchParams(location.search);
     if (params.get("card_id")) $("learning-news-context").textContent = "当前对话会结合刚才打开的已审核消息卡片。";
-    if (params.get("concept_id")) $("learning-message").value = `请解释「${params.get("concept_id").replace(/^concept:/, "")}」，并举一个例子。`;
+    if (params.get("concept_id")) $("learning-message").value = `请解释「${params.get("concept_id").replace(/^(?:concept:|microtopic:[\d.]+-\d+-)/, "")}」，并举一个例子。`;
     const renderHistory = () => {
       const log = $("learning-chat-log"); log.replaceChildren();
       if (!state.history.length) {

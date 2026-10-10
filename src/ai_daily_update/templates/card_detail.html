@@ -63,6 +63,21 @@
 
     <hr>
 
+    <div class="review-note">
+      <h2>公开展示</h2>
+      {% if request.query_params.get('group_error') %}<p class="warning">同事件主卡必须是另一张已审核通过的卡片。</p>{% endif %}
+      <p class="subtle">当前卡片 ID：{{ card.id }}。只有人工确认的同一事件才关联。</p>
+      <form method="post" action="/actions/card-publication">
+        <input type="hidden" name="card_id" value="{{ card.id }}">
+        <label><input type="checkbox" name="first_party" value="true" {% if card.first_party %}checked{% endif %}> 已核实为一手来源</label>
+        <label for="related-card-id">同事件主卡 ID（留空则不归并）</label>
+        <input id="related-card-id" name="related_card_id" value="{{ card.event_group_id }}" placeholder="另一张已接受卡片的 ID">
+        <button type="submit">保存公开展示设置</button>
+      </form>
+    </div>
+
+    <hr>
+
     <form method="post" action="/actions/card-review-note">
       <input type="hidden" name="card_id" value="{{ card.id }}">
       <button type="submit">生成单卡审核建议</button>

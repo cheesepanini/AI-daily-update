@@ -9,7 +9,7 @@
 <section class="toolbar">
   <div>
     <h1>{{ card.title }}</h1>
-    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ card.status_label }}</p>
+    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ card.status_label }}{% if card.first_party %} · 一手来源{% endif %}</p>
   </div>
   <div class="actions">
     <a class="button-link" href="/public">返回列表</a>
@@ -28,6 +28,22 @@
   </div>
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
 </section>
+
+{% if event_sources %}
+<section class="panel">
+  <h2>同一事件的其他来源</h2>
+  <p class="muted">这些报道经过人工确认后归并。</p>
+  <ul>{% for source in event_sources %}<li><a href="{{ source.public_detail_url }}">{{ source.title }}</a> · {{ source.source_label }}{% if source.first_party %} · 一手来源{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if card.recommendation_reason and card.status == 'accepted' %}
+<section class="panel"><h2>值得关注</h2><p>{{ card.recommendation_reason }}</p></section>
+{% endif %}
+
+{% if card.topics %}<section class="panel"><h2>相关主题</h2><div class="concept-chip-list">
+  {% for topic in card.topics %}<a class="concept-chip" href="/public/topics/{{ topic | urlencode }}">{{ topic_labels.get(topic, topic) }}</a>{% endfor %}
+</div></section>{% endif %}
 
 {% if foundational_concepts and not request.app.state.learning_ready %}
 <section class="panel">

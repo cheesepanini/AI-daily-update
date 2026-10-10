@@ -73,17 +73,18 @@ def search_items(catalog: dict[str, Any], query: str, limit: int = 8, kind: str 
 
 
 def choose_news_concepts_with_llm(catalog: dict[str, Any], metadata: dict[str, Any], content: str, llm: Any) -> list[str] | None:
-    """Return reviewed concept IDs, [] for no fit, or None when matching failed."""
+    """Return reviewed textbook item IDs, [] for no fit, or None when matching failed."""
     if not getattr(llm, "available", False) or not catalog.get("complete"):
         return None
-    concepts = {item["id"]: item for item in catalog["items"] if item["type"] == "concept"}
+    concepts = {item["id"]: item for item in catalog["items"] if item["type"] in {"concept", "microtopic"}}
     choices = "\n".join(
-        f"{item_id} | {item['title']} | {item.get('explanation', '')[:80]}"
+        f"{item_id} | {item['title']} | {item.get('explanation', '')[:80 if item['type'] == 'concept' else 40]}"
         for item_id, item in concepts.items()
     )
     prompt = (
         "你正在为刚抓取的新闻卡片关联《人工智能导论》教材知识点。"
-        "选择读懂新闻所需的基础知识，最多 3 个；不要求新闻与教材标题用词相同。"
+        "从概念和细知识点中选择读懂新闻所需的基础知识，最多 3 个；优先选择能解释新闻中具体技术的条目，不要求新闻与教材标题用词相同。"
+        "先看标题、一句话结论和方法/产品要点中的主事件。若主事件不是 AI，只在后文提到可能与 AI 或脑机接口有关，应返回 []；不要为凑满 3 个而硬选。"
         "涉及模型、智能体、机器人、多模态、生成、部署、AI 安全或行业落地时，尽量选出至少 1 个直接相关知识点。"
         "知识点仅用于解释卡片中的术语，不代表新闻事实已经核实；正文标注待核实时仍可匹配明确出现的技术概念。"
         "纯融资、人事、航天或投稿政策等没有可解释技术内容的消息返回 []，不要硬凑。"
@@ -99,7 +100,15 @@ def choose_news_concepts_with_llm(catalog: dict[str, Any], metadata: dict[str, A
         return None
     if not isinstance(selected, list) or any(not isinstance(item_id, str) for item_id in selected):
         return None
-    return list(dict.fromkeys(item_id for item_id in selected[:3] if item_id in concepts))
+    titles: dict[str, str | None] = {}
+    for item_id, item in concepts.items():
+        title = item["title"]
+        titles[title] = item_id if title not in titles else None
+    ids = list(dict.fromkeys(
+        item_id for value in selected
+        if (item_id := value if value in concepts else titles.get(value)) is not None
+    ))[:3]
+    return ids if ids or not selected else None
 
 
 def plan_for_targets(catalog: dict[str, Any], target_ids: list[str], known_ids: list[str] | None = None) -> list[dict[str, Any]]:
