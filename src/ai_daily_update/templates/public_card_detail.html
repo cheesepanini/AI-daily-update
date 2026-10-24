@@ -14,6 +14,7 @@
   <div class="actions">
     <a class="button-link" href="/public">返回列表</a>
     {% if card.source_url %}<a class="button-link" href="{{ card.source_url }}">打开来源</a>{% endif %}
+    <button class="favorite-button" type="button" data-favorite-id="{{ card.id }}" aria-pressed="false">收藏</button>
   </div>
 </section>
 

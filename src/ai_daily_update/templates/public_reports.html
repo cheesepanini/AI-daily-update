@@ -1,0 +1,47 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>AI {{ '周汇总' if period == 'week' else '月汇总' }}{% if selected %}<span class="report-range">{{ selected }} 至 {{ end }}</span>{% endif %}</h1>
+    <p class="muted">按事件日期自动汇集已审核通过的卡片；随审核和日期修正更新，不生成新的 AI 判断。</p>
+  </div>
+</section>
+<section class="panel public-report-controls">
+  <nav class="report-tabs" aria-label="汇总周期">
+    <a class="button-link" href="/public/reports?period=week" {% if period == 'week' %}aria-current="page"{% endif %}>按周</a>
+    <a class="button-link" href="/public/reports?period=month" {% if period == 'month' %}aria-current="page"{% endif %}>按月</a>
+  </nav>
+  <form class="filters" method="get" action="/public/reports">
+    <input type="hidden" name="period" value="{{ period }}">
+    <label for="report-day">查看往期</label>
+    <select id="report-day" name="day">
+      {% for start in periods %}<option value="{{ start }}" {% if start == selected %}selected{% endif %}>{{ start }}{% if period == 'week' %} 起的一周{% else %} 所在月份{% endif %}</option>{% endfor %}
+    </select>
+    <button type="submit">查看</button>
+  </form>
+</section>
+<section class="panel">
+  {% if selected %}
+  <p class="muted">本期 {{ total }} 件事。{% if topic_counts %}涉及主题：{% for label, count in topic_counts %}{{ label }} {{ count }}{% if not loop.last %}、{% endif %}{% endfor %}。{% endif %}</p>
+  {% if by_day %}
+    {% for event_day, cards in by_day.items() %}
+    <section class="report-day">
+      <h2>{{ event_day }} · {{ cards | length }} 件事</h2>
+      <ul class="report-card-list">
+        {% for card in cards %}
+        <li>
+          <div class="report-card-head">
+            <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
+            <button class="favorite-button" type="button" data-favorite-id="{{ card.id }}" aria-pressed="false">收藏</button>
+          </div>
+          {% if card.conclusion %}<p>{{ card.conclusion | truncate(160, True, '…') }}</p>{% endif %}
+          <div class="subtle">{{ card.track_label }}{% if card.source_label %} · 来源：{{ card.source_label }}{% endif %}{% if card.other_sources %} · 另有 {{ card.other_sources | length }} 条同事件报道{% endif %}{% if card.source_url %} · <a href="{{ card.source_url }}">来源原文</a>{% endif %}</div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  {% else %}<p class="muted">这个周期暂无已审核通过的卡片。</p>{% endif %}
+  {% else %}<p class="muted">目前暂无可汇总的已审核卡片。</p>{% endif %}
+</section>
+{% endblock %}

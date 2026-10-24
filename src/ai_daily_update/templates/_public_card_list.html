@@ -8,7 +8,10 @@
   <div class="public-card-main">
     <div class="public-card-title">
       <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
-      <span class="status {{ card.status }}">{{ card.status_label }}</span>
+      <div class="public-card-actions">
+        <span class="status {{ card.status }}">{{ card.status_label }}</span>
+        <button class="favorite-button" type="button" data-favorite-id="{{ card.id }}" aria-pressed="false">收藏</button>
+      </div>
     </div>
     {% if card.conclusion %}<p class="public-card-conclusion">{{ card.conclusion }}</p>{% endif %}
     {% if not card.conclusion and card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}

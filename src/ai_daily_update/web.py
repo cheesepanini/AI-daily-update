@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from calendar import monthrange
 import csv
 import json
 import os
@@ -10,7 +11,7 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import shutil
 from typing import Any
@@ -698,6 +699,16 @@ def create_app(root: Path | None = None) -> FastAPI:
     @app.get("/public/daily/{day}", response_class=HTMLResponse)
     def public_daily_day(request: Request, day: str) -> HTMLResponse:
         return public_daily_response(request, settings, day)
+
+    @app.get("/public/reports", response_class=HTMLResponse)
+    def public_reports(request: Request, period: str = "week", day: str = "") -> HTMLResponse:
+        return public_report_response(request, settings, period, day)
+
+    @app.get("/public/starred", response_class=HTMLResponse)
+    def public_starred(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, "public_starred.html", {
+            "request": request, "is_admin": auth_session_valid(request, settings),
+        })
 
     @app.get("/public/topics", response_class=HTMLResponse)
     def public_topics(request: Request) -> HTMLResponse:
@@ -1769,6 +1780,46 @@ def public_daily_response(request: Request, settings: Settings, day: str = "") -
     daily_cards = group_public_cards([card for card in cards if card["event_date"] == selected])
     return templates.TemplateResponse(request, "public_daily.html", {
         "request": request, "day": selected, "days": days, "cards": daily_cards,
+        "is_admin": auth_session_valid(request, settings),
+    })
+
+
+def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "") -> HTMLResponse:
+    if period not in {"week", "month"} or (day and normalize_iso_date(day) != day):
+        return HTMLResponse("汇总周期或日期无效。", status_code=404)
+
+    def period_start(value: date) -> date:
+        return value - timedelta(days=value.weekday()) if period == "week" else value.replace(day=1)
+
+    cards = filter_public_cards(public_cards(settings), status="accepted")
+    dated = [(card, date.fromisoformat(card["event_date"])) for card in cards if normalize_iso_date(card["event_date"])]
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    starts = sorted({period_start(value) for _, value in dated}, reverse=True)
+    selected = period_start(date.fromisoformat(day)) if day else next(
+        (period_start(value) for _, value in dated if value <= today), None
+    )
+    if selected and selected not in starts:
+        starts = sorted([*starts, selected], reverse=True)
+    end = None
+    period_cards = []
+    if selected:
+        end = selected + timedelta(days=6) if period == "week" else selected.replace(
+            day=monthrange(selected.year, selected.month)[1]
+        )
+        period_cards = [card for card, value in dated if selected <= value <= end]
+    items = group_public_cards(period_cards)
+    by_day: dict[str, list[dict[str, Any]]] = {}
+    for card in sorted(items, key=lambda item: item["event_date"], reverse=True):
+        by_day.setdefault(card["event_date"], []).append(card)
+    labels = {option["id"]: option["label"] for option in topic_options(settings.topics)}
+    topic_counts = sorted(
+        ((labels.get(topic, topic), sum(topic in card["topics"] for card in items))
+         for topic in {topic for card in items for topic in card["topics"]}),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return templates.TemplateResponse(request, "public_reports.html", {
+        "request": request, "period": period, "selected": selected, "end": end,
+        "periods": starts, "by_day": by_day, "total": len(items), "topic_counts": topic_counts,
         "is_admin": auth_session_valid(request, settings),
     })
 

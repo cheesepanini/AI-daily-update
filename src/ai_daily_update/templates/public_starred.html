@@ -1,0 +1,12 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>收藏与稍后阅读</h1>
+    <p class="muted">收藏仅保存在当前浏览器，不需要登录，也不会跨设备同步。</p>
+  </div>
+</section>
+<section class="panel" id="favorites-list" aria-live="polite">
+  <p class="muted">正在读取收藏…</p>
+</section>
+{% endblock %}

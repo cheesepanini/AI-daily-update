@@ -1,5 +1,8 @@
 <article class="public-daily-item">
-  <h2><a href="{{ card.public_detail_url }}">{{ card.title }}</a></h2>
+  <div class="public-card-title">
+    <h2><a href="{{ card.public_detail_url }}">{{ card.title }}</a></h2>
+    <button class="favorite-button" type="button" data-favorite-id="{{ card.id }}" aria-pressed="false">收藏</button>
+  </div>
   {% if card.conclusion %}<p>{{ card.conclusion }}</p>{% endif %}
   {% if card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
   <p class="subtle">{{ card.source_label }}{% if card.first_party %} · 一手来源{% endif %}{% if card.other_sources %} · 另有 {{ card.other_sources | length }} 条同事件报道{% endif %}</p>

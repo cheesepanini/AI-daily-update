@@ -1592,6 +1592,57 @@ hr {
   line-height: 1.35;
 }
 
+.public-card-actions,
+.report-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.favorite-button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+
+.favorite-button[aria-pressed="true"],
+.report-tabs [aria-current="page"] {
+  border-color: #badbd3;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+
+.public-report-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.report-day + .report-day,
+.favorite-item + .favorite-item {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.report-day h2 { margin-bottom: 10px; }
+.report-range { display: block; margin-top: 6px; color: var(--muted); font-size: 15px; font-weight: 500; }
+.report-card-list { margin: 0; padding: 0; list-style: none; }
+.report-card-list li { border-top: 1px solid var(--line); padding: 12px 0; }
+.report-card-list li:last-child { padding-bottom: 0; }
+.report-card-list p { margin: 6px 0; line-height: 1.6; }
+.report-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.report-card-head a { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.public-daily-item .public-card-title h2 { margin: 0; }
+.favorite-item { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.favorite-item h2 { flex: 1 1 240px; }
+.favorite-item p { flex-basis: 100%; margin: 0; }
+
 .public-card-conclusion {
   margin: 0;
   color: var(--text);
@@ -1747,6 +1798,8 @@ code {
     flex-direction: column;
     gap: 8px;
   }
+
+  .public-report-controls { align-items: stretch; flex-direction: column; }
 
   .public-detail-meta {
     grid-template-columns: 1fr;

@@ -79,3 +79,31 @@ def test_future_event_uses_information_date_in_list_and_not_default_daily(tmp_pa
     assert "AI 日报 · 2026-10-10" in daily
     assert "未来计划" not in daily
     assert "未来计划" in client.get("/public/daily/2099-01-01").text
+    report = client.get("/public/reports").text
+    assert "2026-10-05 至 2026-10-11" in report
+    assert "未来计划" not in report
+
+
+def test_public_reports_use_accepted_cards_and_calendar_boundaries(tmp_path):
+    client, _ = make_app(tmp_path)
+    for card_id, event_day, status in [
+        ("year-end", "2026-12-31", "accepted"),
+        ("new-year", "2027-01-01", "accepted"),
+        ("pending-year", "2027-01-02", "needs-review"),
+    ]:
+        path = tmp_path / "notes" / "cards" / "2027" / f"{card_id}.md"
+        write_card(path, {
+            "id": card_id, "title_zh": card_id, "date": event_day,
+            "event_date": event_day, "review_status": status, "track": "industry",
+            "topics": ["agent"], "source_url": f"https://example.com/{card_id}",
+        }, f"## 一句话结论\n{card_id} 摘要。")
+
+    week = client.get("/public/reports?period=week&day=2027-01-01").text
+    assert "2026-12-28 至 2027-01-03" in week
+    assert "year-end" in week and "new-year" in week and "pending-year" not in week
+    assert "本期 2 件事" in week and "https://example.com/year-end" in week
+    month = client.get("/public/reports?period=month&day=2027-01-01").text
+    assert "2027-01-01 至 2027-01-31" in month
+    assert "new-year" in month and "year-end" not in month
+    assert "这个周期暂无" in client.get("/public/reports?period=month&day=2027-02-01").text
+    assert client.get("/public/reports?period=week&day=2027-02-30").status_code == 404
