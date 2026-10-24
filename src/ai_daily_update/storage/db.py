@@ -32,6 +32,18 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 """
 
+PUBLIC_SEARCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS public_search (
+  path TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL, size INTEGER NOT NULL,
+  item_json TEXT NOT NULL, status TEXT NOT NULL, track TEXT NOT NULL,
+  event_date TEXT NOT NULL, info_date TEXT NOT NULL, first_party INTEGER NOT NULL,
+  topics TEXT NOT NULL, search_all TEXT NOT NULL, search_title TEXT NOT NULL,
+  search_summary TEXT NOT NULL, search_body TEXT NOT NULL, search_source TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS public_search_filters
+ON public_search(status, track, event_date, first_party);
+"""
+
 
 def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +51,7 @@ def connect(path: Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute(SCHEMA)
+    connection.executescript(PUBLIC_SEARCH_SCHEMA)
     ensure_columns(connection)
     connection.commit()
     return connection

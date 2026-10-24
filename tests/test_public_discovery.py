@@ -3,7 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from ai_daily_update.config import load_settings
-from ai_daily_update.reports.public_period import source_hash, write_report
+from ai_daily_update.reports.public_period import read_report, source_hash, write_report
 from ai_daily_update.storage.markdown import read_card, update_metadata, write_card
 from ai_daily_update.web import create_app, public_cards, public_period_start
 
@@ -134,3 +134,105 @@ def test_public_reports_use_accepted_cards_and_calendar_boundaries(tmp_path):
     update_metadata(tmp_path / "notes" / "cards" / "2026" / "july.md", {"review_status": "rejected"})
     stale = client.get("/public/reports?period=week&day=2026-07-01").text
     assert "旧总结失效" in stale and "七月进展获得公开证据" not in stale
+
+
+def test_admin_report_edit_citations_staleness_and_regeneration(tmp_path, monkeypatch):
+    from ai_daily_update import web
+
+    client, paths = make_app(tmp_path)
+    settings = load_settings(tmp_path)
+    start = date(2026, 10, 5)
+    members = [card for card in public_cards(settings) if card["id"] in {"alpha", "beta"}]
+    write_report(settings.markdown_root, "week", start, {
+        "lead": "原总述", "highlights": [
+            {"text": "原结论一", "card_ids": ["alpha"]},
+            {"text": "原结论二", "card_ids": ["beta"]},
+        ], "watch": [], "source_hash": source_hash(members), "source": "site_ai",
+        "generated_at": "2026-10-12T08:00",
+    })
+    preview = client.get("/reports?period=week&day=2026-10-10").text
+    assert "原总述" in preview and "模型发布的摘要" in preview
+    assert "https://example.com/alpha" in preview
+    data = {"period": "week", "day": "2026-10-05", "source_hash": source_hash(members),
+            "lead": "人工修订总述", "highlight_text_0": "人工结论一", "highlight_ids_0": "alpha",
+            "highlight_text_1": "人工结论二", "highlight_ids_1": "beta",
+            "watch_text_0": "下一步核对", "watch_ids_0": "alpha"}
+    assert client.post("/actions/report-save", data=data, follow_redirects=False).status_code == 303
+    assert "人工修订总述" in client.get("/public/reports?period=week&day=2026-10-10").text
+    assert "编辑整理" in client.get("/reports?period=week&day=2026-10-10").text
+
+    write_report(settings.markdown_root, "month", date(2026, 10, 1), {
+        "lead": "原月报", "highlights": [
+            {"text": "月度结论一", "card_ids": ["alpha"]},
+            {"text": "月度结论二", "card_ids": ["beta"]},
+        ], "watch": [], "source_hash": source_hash(members), "generated_at": "2026-10-12T08:00",
+    })
+    monthly = {**data, "period": "month", "day": "2026-10-01", "lead": "人工修订月报"}
+    assert client.post("/actions/report-save", data=monthly, follow_redirects=False).status_code == 303
+    assert "人工修订月报" in client.get("/public/reports?period=month&day=2026-10-10").text
+
+    one_conclusion = {**data, "highlight_text_1": "", "highlight_ids_1": ""}
+    one_response = client.post("/actions/report-save", data=one_conclusion, follow_redirects=False)
+    assert one_response.status_code == 303
+    assert len(read_report(settings.markdown_root, "week", start, members)["highlights"]) == 1
+
+    bad = {**data, "lead": "未保存的人工草稿", "highlight_ids_0": "pending"}
+    response = client.post("/actions/report-save", data=bad)
+    assert response.status_code == 400 and "引用只能选本期已审核卡片" in response.text
+    assert "未保存的人工草稿" in response.text
+    assert "人工结论一" in client.get("/reports?period=week&day=2026-10-10").text
+
+    update_metadata(paths["alpha"], {"event_date": "2026-10-12"})
+    assert "旧总结失效" in client.get("/public/reports?period=week&day=2026-10-10").text
+    assert "人工修订总述" not in client.get("/public/reports?period=week&day=2026-10-10").text
+    assert client.post("/actions/report-save", data=data).status_code == 400
+
+    calls = []
+    def fake_generate(root, period, begin, end, cards, llm, timezone):
+        calls.append((period, begin, [card["id"] for card in cards]))
+        return write_report(root, period, begin, {
+            "lead": "重新生成总述", "highlights": [{"text": "仅剩来源", "card_ids": ["beta"]}],
+            "watch": [], "source_hash": source_hash(cards), "source": "site_ai", "generated_at": "2026-10-12T09:00",
+        })
+    monkeypatch.setattr(web, "generate_report", fake_generate)
+    assert client.post("/actions/report-regenerate", data={"period": "week", "day": "2026-10-05"}, follow_redirects=False).status_code == 303
+    assert calls == [("week", start, ["beta"])]
+    assert "重新生成总述" in client.get("/public/reports?period=week&day=2026-10-10").text
+
+
+def test_search_sort_filters_pagination_and_escaped_snippet(tmp_path):
+    client, paths = make_app(tmp_path)
+    for index in range(26):
+        path = tmp_path / "notes" / "cards" / "2026" / "10" / f"rank-{index:02d}.md"
+        write_card(path, {
+            "id": f"rank-{index:02d}", "title_zh": f"模型 Agent {index:02d}",
+            "date": "2026-10-09", "event_date": "2026-10-09", "review_status": "accepted",
+            "track": "industry", "topics": ["agent"], "first_party": True,
+        }, "## 一句话结论\n这是模型 Agent 动态。\n\n## 事件概述\n安全片段 <script>alert(1)</script> 中文关键词。")
+    response = client.get("/public/featured?q=模型+Agent&topic=agent&track=industry&first_party=true&from_date=2026-10-09&to_date=2026-10-10&sort=relevance")
+    assert response.status_code == 200 and "第 1 / 2 页" in response.text
+    assert "sort=relevance" in response.text and "first_party=true" in response.text
+    assert "待审核消息" not in response.text
+    assert "rank-25" in response.text
+    page2 = client.get("/public/featured?q=模型+Agent&topic=agent&track=industry&first_party=true&from_date=2026-10-09&to_date=2026-10-10&sort=relevance&page=2")
+    assert "第 2 / 2 页" in page2.text
+    assert "rank-00" in page2.text
+    assert "模型 Agent 00" in client.get("/public/featured?q=Agent+00&search_field=title").text
+    assert "模型 Agent 00" not in client.get("/public/featured?q=Agent+00&search_field=source").text
+    escaped = client.get("/public/featured?q=中文关键词&search_field=body").text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in escaped
+    assert "<script>alert(1)</script>" not in escaped
+    assert "<mark>中文关键词</mark>" in escaped
+    assert "模型 Agent 00" not in client.get("/public/featured?q=%25_%25&search_field=body").text
+    assert "待审核消息" in client.get("/public").text
+    assert "待审核消息" not in client.get("/public/featured").text
+
+    for card_id, date_value, title in [("older", "2026-10-08", "独特词 独特词"), ("newer", "2026-10-10", "较新动态")]:
+        write_card(tmp_path / "notes" / "cards" / "2026" / "10" / f"{card_id}.md", {
+            "id": card_id, "title_zh": title, "date": date_value, "event_date": date_value,
+            "review_status": "accepted", "track": "industry", "topics": ["agent"],
+        }, "## 一句话结论\n独特词 有进展。")
+    by_time = client.get("/public/featured?q=独特词&sort=time").text
+    by_relevance = client.get("/public/featured?q=独特词&sort=relevance").text
+    assert by_time.index('data-favorite-id="newer"') < by_time.index('data-favorite-id="older"')
+    assert by_relevance.index('data-favorite-id="older"') < by_relevance.index('data-favorite-id="newer"')

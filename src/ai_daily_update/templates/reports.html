@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% macro evidence(entry) %}
+  {% for card in entry.sources %}
+  <div class="report-source">
+    <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
+    <p>{{ card.evidence_text }}</p>
+    {% if card.source_url %}<a href="{{ card.source_url }}" target="_blank" rel="noopener noreferrer">查看原文</a>{% endif %}
+  </div>
+  {% else %}<p class="muted">尚未选择引用卡片。</p>
+  {% endfor %}
+{% endmacro %}
+{% macro fields(prefix, entries, count, label) %}
+  <h2>{{ label }}</h2>
+  {% for index in range(count) %}
+    {% set entry = entries[index] if index < entries|length else none %}
+    <fieldset class="report-edit-entry">
+      <legend>{{ label }} {{ index + 1 }}</legend>
+      <label>表述<textarea name="{{ prefix }}_text_{{ index }}" maxlength="500" rows="3">{{ entry.text if entry else '' }}</textarea></label>
+      <div class="report-source-layout">
+        <label>引用卡片 <span class="subtle">最多 4 张；桌面按 Ctrl 或 ⌘ 多选，手机直接点选</span>
+          <select name="{{ prefix }}_ids_{{ index }}" multiple size="4" data-report-sources>
+            {% for card in period_cards %}<option value="{{ card.id }}" data-title="{{ card.title }}" data-text="{{ card.evidence_text }}" data-card-url="{{ card.public_detail_url }}" data-source-url="{{ card.source_url }}" {% if entry and card.id in entry.card_ids %}selected{% endif %}>{{ card.event_date }} · {{ card.title }}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="report-source-preview"><strong>当前选择的引用</strong><div data-report-preview aria-live="polite">{% if entry %}{{ evidence(entry) }}{% else %}<p class="muted">尚未选择引用卡片。</p>{% endif %}</div></div>
+      </div>
+    </fieldset>
+  {% endfor %}
+{% endmacro %}
+{% block content %}
+<section class="toolbar"><div><h1>周/月报核对与修订</h1><p class="muted">引用 ID 仅校验来源属于本期已审核卡片；请人工判断内容是否真正支持表述。</p></div></section>
+<section class="panel public-report-controls">
+  <nav class="report-tabs" aria-label="报告周期"><a class="button-link" href="/reports?period=week" {% if period == 'week' %}aria-current="page"{% endif %}>周报</a><a class="button-link" href="/reports?period=month" {% if period == 'month' %}aria-current="page"{% endif %}>月报</a></nav>
+  <form class="filters" action="/reports"><input type="hidden" name="period" value="{{ period }}"><label>查看往期 <select name="day">{% for start in periods %}<option value="{{ start }}" {% if start == selected %}selected{% endif %}>{{ start }}</option>{% endfor %}</select></label><button type="submit">查看</button></form>
+</section>
+{% if error %}<p class="login-error report-message" role="alert">{{ error }}</p>{% endif %}
+{% if request.query_params.get('saved') %}<p class="report-message report-success" role="status">修订已保存。</p>{% endif %}
+{% if request.query_params.get('regenerated') %}<p class="report-message report-success" role="status">本期报告已重新生成，请核对结论和引用。</p>{% endif %}
+<section class="panel report-editor">
+  {% if selected %}
+  <div class="panel-head"><div><p class="section-kicker">REPORT REVIEW</p><h2>{{ selected }} 至 {{ end }}</h2></div><span class="brief-count">{{ total }} 张已审核卡片</span></div>
+  {% if report %}
+    <p class="muted">{{ 'AI 自动总结' if report.source == 'site_ai' else '编辑整理' }} · {{ report.generated_at }}</p>
+    <form method="post" action="/actions/report-save" class="report-edit-form">
+      <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="day" value="{{ selected }}"><input type="hidden" name="source_hash" value="{{ report.source_hash }}">
+      <label>总述<textarea name="lead" maxlength="600" rows="4" required>{{ report.lead }}</textarea></label>
+      {{ fields('highlight', report.highlights, 5, '重点结论') }}
+      {{ fields('watch', report.watch, 3, '后续关注') }}
+      <button class="primary" type="submit">保存修订</button>
+    </form>
+  {% else %}<p class="muted">{% if report_state == 'outdated' %}本期资料已变化，旧报告失效。{% elif report_state == 'failed' %}本期生成失败。{% else %}本期尚无报告。{% endif %}</p>{% endif %}
+  {% if period_cards %}<form method="post" action="/actions/report-regenerate" class="report-regenerate" onsubmit="return confirm('重新生成会替换本期现有报告，确认继续？')"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="day" value="{{ selected }}"><button type="submit">重新生成本期</button><span class="muted">会替换当前版本。</span></form>{% endif %}
+  {% else %}<p class="muted">目前暂无已审核卡片。</p>{% endif %}
+</section>
+<script>
+  document.querySelectorAll('[data-report-sources]').forEach(select => {
+    const preview = select.closest('fieldset').querySelector('[data-report-preview]');
+    select.addEventListener('change', () => {
+      preview.replaceChildren();
+      for (const option of select.selectedOptions) {
+        const card = document.createElement('div');
+        card.className = 'report-source';
+        const title = document.createElement('a');
+        title.href = option.dataset.cardUrl;
+        title.textContent = option.dataset.title;
+        const content = document.createElement('p');
+        content.textContent = option.dataset.text;
+        card.append(title, content);
+        if (option.dataset.sourceUrl) {
+          const original = document.createElement('a');
+          original.href = option.dataset.sourceUrl;
+          original.target = '_blank';
+          original.rel = 'noopener noreferrer';
+          original.textContent = '查看原文';
+          card.append(original);
+        }
+        preview.append(card);
+      }
+      if (!select.selectedOptions.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = '尚未选择引用卡片。';
+        preview.append(empty);
+      }
+    });
+  });
+</script>
+{% endblock %}

@@ -62,7 +62,8 @@ def valid_report(data: Any, cards: list[dict[str, Any]]) -> bool:
         return False
     highlights = data.get("highlights")
     watch = data.get("watch")
-    if not isinstance(highlights, list) or not min(3, len(cards)) <= len(highlights) <= 5:
+    minimum = 1 if data.get("source") == "editor" else min(3, len(cards))
+    if not isinstance(highlights, list) or not minimum <= len(highlights) <= 5:
         return False
     if not isinstance(watch, list) or len(watch) > 3:
         return False

@@ -44,6 +44,9 @@ def test_auth_redirects_anonymous_users_to_login(tmp_path) -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
+    assert client.get("/reports", follow_redirects=False).headers["location"] == "/login"
+    assert client.post("/actions/report-save", data={}, follow_redirects=False).headers["location"] == "/login"
+    assert client.get("/public/reports").status_code == 200
 
 
 def test_auth_rejects_bad_password(tmp_path) -> None:

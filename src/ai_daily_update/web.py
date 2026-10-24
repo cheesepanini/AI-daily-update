@@ -54,7 +54,8 @@ from ai_daily_update.ppt.decks import PPTDeck, deck_options, selected_ppt_deck
 from ai_daily_update.ppt.plan import generate_ppt_plan, load_ppt_node_matches
 from ai_daily_update.reports.brief import extract_sections, generate_brief
 from ai_daily_update.reports.public_period import (
-    FIRST_DAY, failed_report, generate_report, read_report, report_path, write_failure,
+    FIRST_DAY, failed_report, generate_report, read_report, report_path, source_hash,
+    valid_report, write_failure, write_report,
 )
 from ai_daily_update.source_proposals import read_source_proposals
 from ai_daily_update.storage import db
@@ -677,23 +678,24 @@ def create_app(root: Path | None = None) -> FastAPI:
     def public_cards_view(
         request: Request, page: int = 1, topic: str = "", q: str = "",
         search_field: str = "all", track: str = "", first_party: bool = False,
-        from_date: str = "", to_date: str = "",
+        from_date: str = "", to_date: str = "", sort: str = "time",
     ) -> HTMLResponse:
         return public_cards_response(
             request, settings, page=page, topic=topic, q=q, search_field=search_field,
             track=track, first_party=first_party, from_date=from_date, to_date=to_date,
+            sort=sort,
         )
 
     @app.get("/public/featured", response_class=HTMLResponse)
     def public_featured_view(
         request: Request, page: int = 1, topic: str = "", q: str = "",
         search_field: str = "all", track: str = "", first_party: bool = False,
-        from_date: str = "", to_date: str = "",
+        from_date: str = "", to_date: str = "", sort: str = "time",
     ) -> HTMLResponse:
         return public_cards_response(
             request, settings, page=page, topic=topic, q=q, search_field=search_field,
             track=track, first_party=first_party, from_date=from_date, to_date=to_date,
-            view="featured",
+            view="featured", sort=sort,
         )
 
     @app.get("/public/daily", response_class=HTMLResponse)
@@ -707,6 +709,65 @@ def create_app(root: Path | None = None) -> FastAPI:
     @app.get("/public/reports", response_class=HTMLResponse)
     def public_reports(request: Request, period: str = "week", day: str = "") -> HTMLResponse:
         return public_report_response(request, settings, period, day)
+
+    @app.get("/reports", response_class=HTMLResponse)
+    def admin_reports(request: Request, period: str = "week", day: str = "") -> HTMLResponse:
+        context = period_report_context(settings, period, day)
+        if context is None:
+            return HTMLResponse("汇总周期或日期无效。", status_code=404)
+        return templates.TemplateResponse(request, "reports.html", {"request": request, **context, "error": ""})
+
+    @app.post("/actions/report-save")
+    async def save_period_report(request: Request):
+        form = await request.form()
+        period, day = str(form.get("period", "")), str(form.get("day", ""))
+        context = period_report_context(settings, period, day)
+        if context is None or not context["selected"]:
+            return HTMLResponse("汇总周期或日期无效。", status_code=404)
+        cards, current = context["period_cards"], context["report"]
+        error = ""
+        if not current or str(form.get("source_hash", "")) != source_hash(cards):
+            error = "本期资料已变化，请重新生成后再编辑。"
+        else:
+            data = {key: current[key] for key in ("period", "start", "end", "source_hash", "generated_at") if key in current}
+            data["lead"] = str(form.get("lead", "")).strip()
+            data["source"] = "editor"
+            for key, prefix, count in (("highlights", "highlight", 5), ("watch", "watch", 3)):
+                data[key] = []
+                for index in range(count):
+                    content = str(form.get(f"{prefix}_text_{index}", "")).strip()
+                    ids = [str(value) for value in form.getlist(f"{prefix}_ids_{index}") if str(value)]
+                    if content or ids:
+                        data[key].append({"text": content, "card_ids": ids})
+            if not valid_report(data, cards):
+                error = "请填写总述、至少 1 条重点结论及其引用；引用只能选本期已审核卡片，每条最多 4 张。"
+                by_id = {card["id"]: card for card in cards}
+                for entry in [*data["highlights"], *data["watch"]]:
+                    entry["sources"] = [by_id[card_id] for card_id in entry["card_ids"] if card_id in by_id]
+                context["report"] = data
+            else:
+                data["generated_at"] = datetime.now(ZoneInfo(settings.timezone)).isoformat(timespec="minutes")
+                write_report(settings.markdown_root, period, context["selected"], data)
+                return RedirectResponse(f"/reports?period={period}&day={day}&saved=1", status_code=303)
+        return templates.TemplateResponse(request, "reports.html", {"request": request, **context, "error": error}, status_code=400)
+
+    @app.post("/actions/report-regenerate")
+    def regenerate_period_report(request: Request, period: str = Form(), day: str = Form()):
+        context = period_report_context(settings, period, day)
+        if context is None or not context["selected"]:
+            return HTMLResponse("汇总周期或日期无效。", status_code=404)
+        if not context["period_cards"]:
+            error = "本期没有已审核卡片。"
+        else:
+            try:
+                from ai_daily_update.cli import _llm_client
+                generate_report(settings.markdown_root, period, context["selected"], context["end"],
+                                context["period_cards"], _llm_client(settings), settings.timezone)
+                return RedirectResponse(f"/reports?period={period}&day={day}&regenerated=1", status_code=303)
+            except Exception:
+                logging.getLogger(__name__).exception("Manual report regeneration failed")
+                error = "重新生成失败，请检查模型配置或稍后重试。"
+        return templates.TemplateResponse(request, "reports.html", {"request": request, **context, "error": error}, status_code=400)
 
     @app.get("/public/starred", response_class=HTMLResponse)
     def public_starred(request: Request) -> HTMLResponse:
@@ -1710,7 +1771,7 @@ def cards_page_url(status: str, track: str, topic: str, q: str, page: int) -> st
 
 def public_page_url(
     topic: str, q: str, page: int, *, view: str = "all", search_field: str = "all",
-    track: str = "", first_party: bool = False, from_date: str = "", to_date: str = "",
+    track: str = "", first_party: bool = False, from_date: str = "", to_date: str = "", sort: str = "time",
 ) -> str:
     params = {}
     if topic:
@@ -1727,6 +1788,8 @@ def public_page_url(
         params["from_date"] = from_date
     if to_date:
         params["to_date"] = to_date
+    if sort == "relevance":
+        params["sort"] = sort
     if page > 1:
         params["page"] = str(page)
     query = urlencode(params)
@@ -1734,21 +1797,123 @@ def public_page_url(
     return f"{path}?{query}" if query else path
 
 
+def sync_public_search(settings: Settings, connection: Any) -> None:
+    known = {row["path"]: (row["mtime_ns"], row["size"]) for row in connection.execute(
+        "SELECT path, mtime_ns, size FROM public_search"
+    )}
+    seen = set()
+    with connection:
+        for path in iter_cards(settings.markdown_root):
+            key = str(path)
+            seen.add(key)
+            stat = path.stat()
+            if known.get(key) == (stat.st_mtime_ns, stat.st_size):
+                continue
+            card = read_card(path)
+            item = card_list_item(path, card.metadata, card.content)
+            payload = {name: value for name, value in item.items() if name != "path"}
+            fields = item["search_fields"]
+            connection.execute("""
+                INSERT OR REPLACE INTO public_search
+                (path, mtime_ns, size, item_json, status, track, event_date, info_date,
+                 first_party, topics, search_all, search_title, search_summary, search_body, search_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (key, stat.st_mtime_ns, stat.st_size, json.dumps(payload, ensure_ascii=False),
+                  item["status"], item["track"], item["event_date"], item["info_date"],
+                  int(item["first_party"]), json.dumps(item["topics"], ensure_ascii=False),
+                  *(fields[name] for name in ("all", "title", "summary", "body", "source"))))
+        for removed in known.keys() - seen:
+            connection.execute("DELETE FROM public_search WHERE path = ?", (removed,))
+
+
+def search_public_cards(settings: Settings, *, status: str = "", track: str = "", topic: str = "",
+                        q: str = "", search_field: str = "all", first_party: bool = False,
+                        from_date: str = "", to_date: str = "") -> list[dict[str, Any]]:
+    field = search_field if search_field in {"all", "title", "summary", "body", "source"} else "all"
+    column = f"search_{field}"
+    clauses = ["status IN ('accepted', 'needs-review', 'later')"]
+    values: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        values.append(status)
+    if track:
+        clauses.append("track = ?")
+        values.append(track)
+    if topic:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(public_search.topics) WHERE value = ?)")
+        values.append(topic)
+    if first_party:
+        clauses.append("first_party = 1")
+    start = normalize_iso_date(from_date) if from_date else ""
+    end = normalize_iso_date(to_date) if to_date else ""
+    if start and end and end < start:
+        start, end = end, start
+    if start:
+        clauses.append("event_date >= ?")
+        values.append(start)
+    if end:
+        clauses.append("event_date <= ?")
+        values.append(end)
+    for term in q.strip().casefold().split():
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append(f"{column} LIKE ? ESCAPE '\\'")
+        values.append(f"%{escaped}%")
+    connection = db.connect(settings.sqlite_path)
+    try:
+        sync_public_search(settings, connection)
+        rows = connection.execute("SELECT path, item_json FROM public_search WHERE " + " AND ".join(clauses), values)
+        items = []
+        for row in rows:
+            item = json.loads(row["item_json"])
+            item["path"] = Path(row["path"])
+            items.append(item)
+    finally:
+        connection.close()
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+    def sort_date(item: dict[str, Any]) -> str:
+        event, info = item.get("event_date") or "", item.get("info_date") or ""
+        return info if event > today and info and info <= today else event or info
+    return sorted(items, key=lambda item: (sort_date(item), item.get("info_date") or "", item.get("id") or ""), reverse=True)
+
+
+def search_snippet(card: dict[str, Any], q: str, search_field: str) -> list[tuple[str, bool]]:
+    fields = (search_field,) if search_field in {"title", "summary", "body", "source"} else ("title", "summary", "body", "source")
+    terms = q.strip().split()
+    candidates = [str(card.get("display_fields", {}).get(field, "")) for field in fields]
+    candidates.sort(key=lambda value: sum(term.casefold() in value.casefold() for term in terms), reverse=True)
+    for raw in candidates:
+        match = next((found for term in terms if (found := re.search(re.escape(term), raw, re.IGNORECASE))), None)
+        if match:
+            start = max(0, match.start() - 55)
+            end = min(len(raw), match.end() + 85)
+            excerpt = ("…" if start else "") + raw[start:end].replace("\n", " ") + ("…" if end < len(raw) else "")
+            pattern = re.compile("(" + "|".join(re.escape(term) for term in terms) + ")", re.IGNORECASE)
+            return [(part, bool(pattern.fullmatch(part))) for part in pattern.split(excerpt) if part]
+    return []
+
+
 def public_cards_response(
     request: Request, settings: Settings, page: int = 1, topic: str = "", q: str = "",
     search_field: str = "all", track: str = "", first_party: bool = False,
-    from_date: str = "", to_date: str = "", view: str = "all",
+    from_date: str = "", to_date: str = "", view: str = "all", sort: str = "time",
 ) -> HTMLResponse:
-    items = filter_public_cards(
-        public_cards(settings), status="accepted" if view == "featured" else "",
-        topic=topic, q=q, search_field=search_field, track=track,
-        first_party=first_party, from_date=from_date, to_date=to_date,
-    )
+    sort = sort if sort in {"time", "relevance"} else "time"
+    items = search_public_cards(settings, status="accepted" if view == "featured" else "",
+                                topic=topic, q=q, search_field=search_field, track=track,
+                                first_party=first_party, from_date=from_date, to_date=to_date)
+    if q.strip() and sort == "relevance":
+        terms = q.strip().casefold().split()
+        fields = (search_field,) if search_field in {"title", "summary", "body", "source"} else ("title", "summary", "source", "body")
+        weights = {"title": 8, "summary": 4, "source": 2, "body": 1}
+        items.sort(key=lambda card: sum(weights[field] * sum(card["search_fields"][field].count(term) for term in terms) for field in fields), reverse=True)
     items = group_public_cards(items)
     paginated = paginate_items(items, page=page, page_size=20)
+    if q.strip():
+        for card in paginated["items"]:
+            card["snippet_parts"] = search_snippet(card, q, search_field)
     page_url = lambda target_page: public_page_url(
         topic, q, target_page, view=view, search_field=search_field,
-        track=track, first_party=first_party, from_date=from_date, to_date=to_date,
+        track=track, first_party=first_party, from_date=from_date, to_date=to_date, sort=sort,
     )
     return templates.TemplateResponse(
         request,
@@ -1762,6 +1927,7 @@ def public_cards_response(
             "q": q,
             "view": view,
             "search_field": search_field,
+            "sort": sort,
             "track": track,
             "first_party": first_party,
             "from_date": from_date,
@@ -1788,16 +1954,16 @@ def public_daily_response(request: Request, settings: Settings, day: str = "") -
     })
 
 
-def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "") -> HTMLResponse:
+def period_report_context(settings: Settings, period: str = "week", day: str = "") -> dict[str, Any] | None:
     if period not in {"week", "month"} or (day and normalize_iso_date(day) != day):
-        return HTMLResponse("汇总周期或日期无效。", status_code=404)
+        return None
     today = datetime.now(ZoneInfo(settings.timezone)).date()
     requested = date.fromisoformat(day) if day else None
     if requested and (
         requested > today
         or public_period_end(public_period_start(requested, period), period) < FIRST_DAY
     ):
-        return HTMLResponse("该日期尚无周/月总结。", status_code=404)
+        return None
     cards = filter_public_cards(public_cards(settings), status="accepted")
     dated = [
         (card, date.fromisoformat(card["event_date"])) for card in cards
@@ -1819,12 +1985,23 @@ def public_report_response(request: Request, settings: Settings, period: str = "
         f"/public/featured?from_date={max(selected, FIRST_DAY)}&to_date={min(end, today)}"
         if selected and end else "/public/featured"
     )
-    return templates.TemplateResponse(request, "public_reports.html", {
-        "request": request, "period": period, "selected": selected, "end": end,
+    for card in period_cards:
+        parts = [card.get("conclusion", ""), card.get("event_overview", "")]
+        card["evidence_text"] = "\n".join(dict.fromkeys(part for part in parts if part))[:400] or card.get("search_fields", {}).get("body", "")[:400]
+    return {
+        "period": period, "selected": selected, "end": end, "period_cards": period_cards,
         "periods": starts, "report": report, "report_state": report_state, "total": len(period_cards),
         "in_progress": bool(end and end >= today), "first_partial_week": bool(selected and selected < FIRST_DAY),
         "all_url": all_url,
-        "is_admin": auth_session_valid(request, settings),
+    }
+
+
+def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "") -> HTMLResponse:
+    context = period_report_context(settings, period, day)
+    if context is None:
+        return HTMLResponse("汇总周期或日期无效。", status_code=404)
+    return templates.TemplateResponse(request, "public_reports.html", {
+        "request": request, **context, "is_admin": auth_session_valid(request, settings),
     })
 
 
@@ -1997,6 +2174,7 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "body": content,
         "source": f"{source} {source_url}",
     }
+    display_fields = dict(search_fields)
     search_fields = {key: value.casefold() for key, value in search_fields.items()}
     search_fields["all"] = " ".join([*search_fields.values(), " ".join(metadata.get("topics", []) or [])]).casefold()
     return {
@@ -2009,6 +2187,7 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "recommendation_reason": reason,
         "search_text": search_fields["all"],
         "search_fields": search_fields,
+        "display_fields": display_fields,
         "track": metadata.get("track", ""),
         "track_label": TRACK_LABELS.get(metadata.get("track", ""), metadata.get("track", "")),
         "source_type": metadata.get("source_type", ""),

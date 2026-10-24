@@ -14,6 +14,7 @@
       </div>
     </div>
     {% if card.conclusion %}<p class="public-card-conclusion">{{ card.conclusion }}</p>{% endif %}
+    {% if card.snippet_parts %}<p class="search-snippet">命中片段：{% for part, matched in card.snippet_parts %}{% if matched %}<mark>{{ part }}</mark>{% else %}{{ part }}{% endif %}{% endfor %}</p>{% endif %}
     {% if not card.conclusion and card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
     {% if card.recommendation_reason and card.status == 'accepted' %}<p class="public-reason">值得关注：{{ card.recommendation_reason | truncate(110, True, '…') }}</p>{% endif %}
     <div class="subtle">

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI消息速览</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20261010-2">
+    <link rel="stylesheet" href="/static/dashboard.css?v=20261024-4">
     <script src="/static/dashboard.js?v=20260709-1" defer></script>
   </head>
   <body>
@@ -15,6 +15,7 @@
           <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>工作台</a>
           <a href="/cards" {% if request.url.path.startswith('/cards') or request.url.path == '/trash' %}aria-current="page"{% endif %}>卡片</a>
           <a href="/briefs" {% if request.url.path == '/briefs' %}aria-current="page"{% endif %}>简报</a>
+          <a href="/reports" {% if request.url.path == '/reports' %}aria-current="page"{% endif %}>周/月报</a>
           <a href="/ppt" {% if request.url.path == '/ppt' %}aria-current="page"{% endif %}>PPT</a>
           <a href="/sources" {% if request.url.path == '/sources' %}aria-current="page"{% endif %}>消息源</a>
           <a href="/trends" {% if request.url.path == '/trends' %}aria-current="page"{% endif %}>趋势</a>
