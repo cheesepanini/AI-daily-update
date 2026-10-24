@@ -5,6 +5,7 @@ import hmac
 from calendar import monthrange
 import csv
 import json
+import logging
 import os
 import re
 import threading
@@ -52,6 +53,9 @@ from ai_daily_update.preference.features import (
 from ai_daily_update.ppt.decks import PPTDeck, deck_options, selected_ppt_deck
 from ai_daily_update.ppt.plan import generate_ppt_plan, load_ppt_node_matches
 from ai_daily_update.reports.brief import extract_sections, generate_brief
+from ai_daily_update.reports.public_period import (
+    FIRST_DAY, failed_report, generate_report, read_report, report_path, write_failure,
+)
 from ai_daily_update.source_proposals import read_source_proposals
 from ai_daily_update.storage import db
 from ai_daily_update.storage.indexer import rebuild_index
@@ -1787,41 +1791,82 @@ def public_daily_response(request: Request, settings: Settings, day: str = "") -
 def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "") -> HTMLResponse:
     if period not in {"week", "month"} or (day and normalize_iso_date(day) != day):
         return HTMLResponse("汇总周期或日期无效。", status_code=404)
-
-    def period_start(value: date) -> date:
-        return value - timedelta(days=value.weekday()) if period == "week" else value.replace(day=1)
-
-    cards = filter_public_cards(public_cards(settings), status="accepted")
-    dated = [(card, date.fromisoformat(card["event_date"])) for card in cards if normalize_iso_date(card["event_date"])]
     today = datetime.now(ZoneInfo(settings.timezone)).date()
-    starts = sorted({period_start(value) for _, value in dated}, reverse=True)
-    selected = period_start(date.fromisoformat(day)) if day else next(
-        (period_start(value) for _, value in dated if value <= today), None
-    )
+    requested = date.fromisoformat(day) if day else None
+    if requested and (
+        requested > today
+        or public_period_end(public_period_start(requested, period), period) < FIRST_DAY
+    ):
+        return HTMLResponse("该日期尚无周/月总结。", status_code=404)
+    cards = filter_public_cards(public_cards(settings), status="accepted")
+    dated = [
+        (card, date.fromisoformat(card["event_date"])) for card in cards
+        if normalize_iso_date(card["event_date"]) and FIRST_DAY <= date.fromisoformat(card["event_date"]) <= today
+    ]
+    starts = sorted({public_period_start(value, period) for _, value in dated}, reverse=True)
+    selected = public_period_start(requested, period) if requested else (starts[0] if starts else None)
     if selected and selected not in starts:
         starts = sorted([*starts, selected], reverse=True)
-    end = None
-    period_cards = []
-    if selected:
-        end = selected + timedelta(days=6) if period == "week" else selected.replace(
-            day=monthrange(selected.year, selected.month)[1]
-        )
-        period_cards = [card for card, value in dated if selected <= value <= end]
-    items = group_public_cards(period_cards)
-    by_day: dict[str, list[dict[str, Any]]] = {}
-    for card in sorted(items, key=lambda item: item["event_date"], reverse=True):
-        by_day.setdefault(card["event_date"], []).append(card)
-    labels = {option["id"]: option["label"] for option in topic_options(settings.topics)}
-    topic_counts = sorted(
-        ((labels.get(topic, topic), sum(topic in card["topics"] for card in items))
-         for topic in {topic for card in items for topic in card["topics"]}),
-        key=lambda item: (-item[1], item[0]),
+    end = public_period_end(selected, period) if selected else None
+    period_cards = [card for card, value in dated if selected and selected <= value <= end]
+    report = read_report(settings.markdown_root, period, selected, period_cards) if selected and period_cards else None
+    report_state = (
+        "failed" if failed_report(settings.markdown_root, period, selected, period_cards)
+        else "outdated" if report_path(settings.markdown_root, period, selected).exists()
+        else "pending"
+    ) if selected and period_cards and not report else "ready"
+    all_url = (
+        f"/public/featured?from_date={max(selected, FIRST_DAY)}&to_date={min(end, today)}"
+        if selected and end else "/public/featured"
     )
     return templates.TemplateResponse(request, "public_reports.html", {
         "request": request, "period": period, "selected": selected, "end": end,
-        "periods": starts, "by_day": by_day, "total": len(items), "topic_counts": topic_counts,
+        "periods": starts, "report": report, "report_state": report_state, "total": len(period_cards),
+        "in_progress": bool(end and end >= today), "first_partial_week": bool(selected and selected < FIRST_DAY),
+        "all_url": all_url,
         "is_admin": auth_session_valid(request, settings),
     })
+
+
+def public_period_start(value: date, period: str) -> date:
+    return value - timedelta(days=value.weekday()) if period == "week" else value.replace(day=1)
+
+
+def public_period_end(start: date, period: str) -> date:
+    return start + timedelta(days=6) if period == "week" else start.replace(
+        day=monthrange(start.year, start.month)[1]
+    )
+
+
+def refresh_public_reports(settings: Settings) -> list[str]:
+    from ai_daily_update.cli import _llm_client
+
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    cards = [
+        card for card in public_cards(settings)
+        if card["status"] == "accepted" and normalize_iso_date(card["event_date"])
+        and FIRST_DAY <= date.fromisoformat(card["event_date"]) <= today
+    ]
+    llm = _llm_client(settings)
+    results = []
+    for period in ("week", "month"):
+        groups: dict[date, list[dict[str, Any]]] = {}
+        for card in cards:
+            start = public_period_start(date.fromisoformat(card["event_date"]), period)
+            groups.setdefault(start, []).append(card)
+        for start, members in sorted(groups.items()):
+            if read_report(settings.markdown_root, period, start, members):
+                continue
+            try:
+                generate_report(
+                    settings.markdown_root, period, start, public_period_end(start, period),
+                    members, llm, settings.timezone,
+                )
+                results.append(f"{period}:{start}")
+            except Exception:
+                write_failure(settings.markdown_root, period, start, members)
+                logging.getLogger(__name__).exception("Public report generation failed: %s %s", period, start)
+    return results
 
 
 def event_sources(card: dict[str, Any], cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4244,6 +4289,10 @@ def run_daily_job(job_id: str) -> None:
             dry_run=bool(snapshot.get("dry_run")),
             progress=progress,
         )
+        if snapshot.get("trigger") == "schedule" and not snapshot.get("dry_run"):
+            job_update(job_id, step="正在更新周报和月报")
+            refreshed = refresh_public_reports(settings)
+            job_log(job_id, f"已更新 {len(refreshed)} 份周/月总结")
         job_update(job_id, status="complete", step="已完成")
         job_log(job_id, "任务完成，可以刷新卡片、候选报告或简报页面查看结果")
     except Exception as exc:

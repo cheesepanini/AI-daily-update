@@ -1623,21 +1623,21 @@ hr {
   margin-bottom: 20px;
 }
 
-.report-day + .report-day,
 .favorite-item + .favorite-item {
   border-top: 1px solid var(--line);
   margin-top: 18px;
   padding-top: 18px;
 }
 
-.report-day h2 { margin-bottom: 10px; }
 .report-range { display: block; margin-top: 6px; color: var(--muted); font-size: 15px; font-weight: 500; }
-.report-card-list { margin: 0; padding: 0; list-style: none; }
-.report-card-list li { border-top: 1px solid var(--line); padding: 12px 0; }
-.report-card-list li:last-child { padding-bottom: 0; }
-.report-card-list p { margin: 6px 0; line-height: 1.6; }
-.report-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.report-card-head a { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.report-lead { margin: 22px 0; font-size: 18px; line-height: 1.7; }
+.public-report-body h2 { margin: 24px 0 12px; }
+.report-highlights, .report-watch { display: grid; gap: 16px; padding-left: 24px; }
+.report-highlights li, .report-watch li { line-height: 1.7; overflow-wrap: anywhere; }
+.report-highlights p { margin: 0 0 6px; font-weight: 600; }
+.report-evidence { color: var(--muted); font-size: 13px; font-weight: 400; line-height: 1.6; }
+.report-evidence a { overflow-wrap: anywhere; }
+.report-all-link { margin-top: 18px; }
 .public-daily-item .public-card-title h2 { margin: 0; }
 .favorite-item { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .favorite-item h2 { flex: 1 1 240px; }
