@@ -30,6 +30,24 @@
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
 </section>
 
+{% if card.research_links %}
+<section class="panel"><h2>研究资料</h2><div class="resource-links">
+  {% for key, label in [('paper', '论文原文'), ('code', '代码'), ('model', '模型'), ('dataset', '数据集')] %}
+  {% if card.research_links.get(key) %}<a class="button-link" href="{{ card.research_links[key] }}" target="_blank" rel="noopener noreferrer">{{ label }}</a>{% endif %}
+  {% endfor %}
+</div><p class="subtle">以上链接经管理员逐项核对。</p></section>
+{% endif %}
+
+{% if revisions %}<section class="panel"><h2>修订记录</h2><ul>{% for item in revisions %}<li>{{ item.resolved_at[:10] }} · {{ item.summary }}</li>{% endfor %}</ul></section>{% endif %}
+<section class="panel correction-panel"><h2>发现内容有误？</h2><p class="muted">免登录提交，管理员审核并完成修正后才会公开修订说明。</p>
+  {% if request.query_params.get('correction_sent') %}<p class="report-success" role="status">纠错已提交，感谢反馈。</p>{% endif %}
+  <form method="post" action="/public/corrections"><input type="hidden" name="kind" value="card"><input type="hidden" name="target" value="{{ card.id }}">
+    <input class="visually-hidden" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <label>问题与依据<textarea name="message" minlength="10" maxlength="2000" rows="4" required placeholder="请说明哪一句有误，并尽量提供可核对的依据"></textarea></label>
+    <button type="submit">提交纠错</button>
+  </form>
+</section>
+
 {% if event_sources %}
 <section class="panel">
   <h2>同一事件的其他来源</h2>

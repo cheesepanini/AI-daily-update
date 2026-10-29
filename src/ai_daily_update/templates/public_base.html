@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI消息速览</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20261024-4">
+    <link rel="stylesheet" href="/static/dashboard.css?v=20261029-2">
     <script src="/static/favorites.js?v=20261024-1" defer></script>
+    {% if request.url.path == '/public/follows' %}<script src="/static/follows.js?v=20261029-1" defer></script>{% endif %}
   </head>
   <body>
     <header class="topbar public-topbar">
@@ -14,10 +15,11 @@
         <nav class="nav" aria-label="网站导航">
           <a href="/public/featured" {% if request.url.path == '/public/featured' %}aria-current="page"{% endif %}>精选</a>
           <a href="/public" {% if request.url.path == '/public' %}aria-current="page"{% endif %}>全部动态</a>
-          <a href="/public/daily" {% if request.url.path.startswith('/public/daily') %}aria-current="page"{% endif %}>日报</a>
-          <a href="/public/reports" {% if request.url.path == '/public/reports' %}aria-current="page"{% endif %}>周/月汇总</a>
+          <a href="/public/reports" {% if request.url.path == '/public/reports' or request.url.path.startswith('/public/daily') %}aria-current="page"{% endif %}>日报/周报/月报</a>
           <a href="/public/topics" {% if request.url.path.startswith('/public/topics') %}aria-current="page"{% endif %}>主题</a>
           <a href="/public/starred" {% if request.url.path == '/public/starred' %}aria-current="page"{% endif %}>收藏</a>
+          <a href="/public/follows" {% if request.url.path == '/public/follows' %}aria-current="page"{% endif %}>我的关注</a>
+          <a href="/public/ai-links" {% if request.url.path == '/public/ai-links' %}aria-current="page"{% endif %}>AI 入口</a>
           {% if request.app.state.learning_ready %}
           <a href="/learn" {% if request.url.path == '/learn' or request.url.path.startswith('/learn/concepts/') %}aria-current="page"{% endif %}>学习路径</a>
           <a href="/learn/chat" {% if request.url.path == '/learn/chat' %}aria-current="page"{% endif %}>知识点问答</a>

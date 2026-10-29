@@ -1,0 +1,16 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar"><div><h1>常用 AI 入口</h1><p class="muted">仅跳转服务官方网页；本站不接收或保存 API Key。</p></div></section>
+<section class="panel"><label class="public-search-keyword">搜索服务名称<input id="ai-link-search" type="search" placeholder="例如 Claude、绘图"></label></section>
+{% for category in categories %}
+<section class="panel ai-link-section" data-category="{{ category }}"><h2>{{ category }}</h2><div class="ai-link-grid">
+  {% for group, name, web, keys, docs in links if group == category %}
+  <article class="ai-link-card" data-name="{{ name | lower }}"><h3>{{ name }}</h3><div class="ai-link-actions">
+    <a class="button-link" href="{{ web }}" target="_blank" rel="noopener noreferrer">官方网站</a>
+    {% if keys and docs %}<a href="{{ keys }}" target="_blank" rel="noopener noreferrer">API Key 管理</a><a href="{{ docs }}" target="_blank" rel="noopener noreferrer">开发文档</a>{% endif %}
+  </div></article>
+  {% endfor %}
+</div></section>
+{% endfor %}
+<script>document.getElementById('ai-link-search').addEventListener('input', event => { const query = event.target.value.trim().toLocaleLowerCase(); document.querySelectorAll('.ai-link-section').forEach(section => { let shown = 0; section.querySelectorAll('.ai-link-card').forEach(card => { card.hidden = !(`${card.dataset.name} ${section.dataset.category}`.toLocaleLowerCase().includes(query)); shown += !card.hidden; }); section.hidden = !shown; }); });</script>
+{% endblock %}

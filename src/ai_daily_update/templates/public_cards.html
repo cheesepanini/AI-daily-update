@@ -5,6 +5,7 @@
     <h1>{{ '精选' if view == 'featured' else '全部动态' }}</h1>
     <p class="muted">知识卡片{% if q and sort == 'relevance' %}按相关度排列{% else %}按事件日期排列{% endif %}。{% if view == 'featured' %}仅展示已审核通过的卡片。{% else %}待审核与稍后处理的内容仅供参考。{% endif %}</p>
   </div>
+  {% if view == 'featured' %}<div class="actions"><a class="button-link" href="/feeds/featured.rss">RSS</a><a class="button-link" href="/feeds/featured.json">JSON Feed</a></div>{% endif %}
 </section>
 <section class="panel public-search-panel" aria-label="筛选动态">
   <form class="public-filters" method="get" action="{{ '/public/featured' if view == 'featured' else '/public' }}">

@@ -1,0 +1,12 @@
+{% extends "public_base.html" %}
+{% block content %}
+<section class="toolbar"><div><h1>我的关注与未读</h1><p class="muted">关注设置和阅读状态仅保存在当前浏览器；这里匹配已审核通过的公开卡片。</p></div></section>
+<section class="panel follow-controls"><h2>关注条件</h2><p class="subtle">任一主题、关键词或来源命中即可出现在列表中。</p>
+  <div class="follow-adders">
+    <form data-follow-form="topics"><label>主题<select name="value">{% for topic in topics %}<option value="{{ topic.id }}">{{ topic.label }}</option>{% endfor %}</select></label><button type="submit">关注主题</button></form>
+    <form data-follow-form="keywords"><label>关键词<input name="value" maxlength="80" placeholder="例如 Agent" required></label><button type="submit">关注关键词</button></form>
+    <form data-follow-form="sources"><label>来源名称或域名<input name="value" maxlength="80" placeholder="例如 arxiv.org" required></label><button type="submit">关注来源</button></form>
+  </div><div id="follow-tags" class="concept-chip-list" aria-live="polite"></div>
+</section>
+<section class="panel"><div class="panel-head"><h2>匹配的动态</h2><span id="follow-count" class="subtle"></span></div><div id="follow-list" class="follow-list" aria-live="polite"><p class="muted">正在读取关注设置…</p></div><button id="follow-more" type="button" hidden>加载更多</button></section>
+{% endblock %}

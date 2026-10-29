@@ -48,6 +48,31 @@ def test_featured_daily_topic_and_search_use_reviewed_cards(tmp_path):
     assert "模型发布" in client.get("/public/topics/agent").text
 
 
+def test_unified_report_entry_uses_calendar_for_day_week_and_month(tmp_path):
+    from bs4 import BeautifulSoup
+
+    client, _ = make_app(tmp_path)
+    daily = BeautifulSoup(client.get("/public/reports?period=day&day=2026-10-10").text, "html.parser")
+    assert [link.get_text(strip=True) for link in daily.select(".report-tabs a")] == ["日报", "周报", "月报"]
+    assert daily.select_one('.report-calendar a[aria-label="选择 2026-10-10"]').get("aria-current") == "date"
+    assert "has-data" not in daily.select_one('.report-calendar a[aria-label="选择 2026-10-11"]').get("class", [])
+    assert not daily.select(".report-calendar select")
+    assert "模型发布" in daily.get_text()
+    assert "待审核消息" not in daily.get_text()
+
+    week = client.get("/public/reports?period=week&day=2026-10-10").text
+    assert 'aria-label="选择 10月5日—10月11日 这一周"' in week
+    assert "2026-10-05 至 2026-10-11" in week
+    empty_week = BeautifulSoup(client.get("/public/reports?period=week&day=2026-10-12").text, "html.parser")
+    assert "has-data" not in empty_week.select_one('.report-calendar-week[aria-current="date"]').get("class", [])
+    month = client.get("/public/reports?period=month&day=2026-10-10").text
+    assert "report-calendar-months" in month and "10 月" in month
+    assert "2026 年 09 月" in client.get("/public/reports?period=day&day=2026-10-10&calendar=2026-09").text
+    assert client.get("/public/reports?period=day&calendar=invalid").status_code == 404
+    assert client.get("/public/reports?period=week&calendar=9999-12").status_code == 404
+    assert client.get("/public/daily/2026-10-10").status_code == 200
+
+
 def test_confirmed_event_group_and_first_party_filter(tmp_path):
     client, paths = make_app(tmp_path)
     response = client.post("/actions/card-publication", data={

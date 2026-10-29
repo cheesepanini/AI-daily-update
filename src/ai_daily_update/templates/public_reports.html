@@ -2,29 +2,41 @@
 {% block content %}
 <section class="toolbar">
   <div>
-    <h1>AI {{ '周报' if period == 'week' else '月报' }}{% if selected %}<span class="report-range">{{ selected }} 至 {{ end }}</span>{% endif %}</h1>
-    <p class="muted">依据已审核通过的卡片撰写，结论附可核对的资料链接。</p>
+    <h1>AI {{ {'day': '日报', 'week': '周报', 'month': '月报'}[period] }}{% if period == 'day' and selected %} · {{ selected }}{% elif selected %}<span class="report-range">{{ selected }} 至 {{ end }}</span>{% endif %}</h1>
+    <p class="muted">{% if period == 'day' %}按事件日期汇集已审核通过的消息；内容随卡片审核和日期修正更新。{% else %}依据已审核通过的卡片撰写，结论附可核对的资料链接。{% endif %}</p>
   </div>
+  {% if period != 'day' %}<div class="actions"><a class="button-link" href="/feeds/reports.rss">RSS</a><a class="button-link" href="/feeds/reports.json">JSON Feed</a></div>{% endif %}
 </section>
-<section class="panel public-report-controls">
+<section class="panel public-report-controls report-picker-controls">
   <nav class="report-tabs" aria-label="报告周期">
+    <a class="button-link" href="/public/reports?period=day" {% if period == 'day' %}aria-current="page"{% endif %}>日报</a>
     <a class="button-link" href="/public/reports?period=week" {% if period == 'week' %}aria-current="page"{% endif %}>周报</a>
     <a class="button-link" href="/public/reports?period=month" {% if period == 'month' %}aria-current="page"{% endif %}>月报</a>
   </nav>
-  <form class="filters" method="get" action="/public/reports">
-    <input type="hidden" name="period" value="{{ period }}">
-    <label for="report-day">查看往期</label>
-    <select id="report-day" name="day">
-      {% for start in periods %}<option value="{{ start }}" {% if start == selected %}selected{% endif %}>{{ start }}{% if period == 'week' %} 起的一周{% else %} 所在月份{% endif %}</option>{% endfor %}
-    </select>
-    <button type="submit">查看</button>
-  </form>
+  <div class="report-calendar" aria-label="选择{{ {'day': '日期', 'week': '周次', 'month': '月份'}[period] }}">
+    <div class="report-calendar-head"><a href="{{ picker.previous }}" {% if not picker.previous %}aria-disabled="true" tabindex="-1"{% endif %} aria-label="上一{{ '年' if period == 'month' else '月' }}">‹</a><strong>{{ picker.heading }}</strong><a href="{{ picker.following }}" {% if not picker.following %}aria-disabled="true" tabindex="-1"{% endif %} aria-label="下一{{ '年' if period == 'month' else '月' }}">›</a></div>
+    {% if period == 'month' %}<div class="report-calendar-months">{% for month in picker.months %}{% if month.url %}<a href="{{ month.url }}" {% if month.active %}aria-current="date"{% endif %} class="{{ 'has-data' if month.available else '' }}">{{ month.label }}</a>{% else %}<span class="disabled">{{ month.label }}</span>{% endif %}{% endfor %}</div>
+    {% else %}<div class="report-calendar-weekdays">{% for label in ['一', '二', '三', '四', '五', '六', '日'] %}<span>{{ label }}</span>{% endfor %}</div>
+      {% for week in picker.weeks %}{% if period == 'week' %}{% if week.url %}<a class="report-calendar-week {{ 'has-data' if week.available else '' }}" href="{{ week.url }}" aria-label="选择 {{ week.label }} 这一周" {% if week.active %}aria-current="date"{% endif %}>{% for cell in week.days %}<span class="{{ 'outside' if not cell.in_month else '' }}">{{ cell.label }}</span>{% endfor %}<small>{{ week.label }}{% if week.available %} · 有内容{% endif %}</small></a>{% else %}<div class="report-calendar-week disabled">{% for cell in week.days %}<span>{{ cell.label }}</span>{% endfor %}</div>{% endif %}
+      {% else %}<div class="report-calendar-days">{% for cell in week.days %}{% if cell.url %}<a href="{{ cell.url }}" class="{{ 'outside' if not cell.in_month else '' }} {{ 'has-data' if cell.available else '' }}" {% if cell.active %}aria-current="date"{% endif %} aria-label="选择 {{ cell.date }}">{{ cell.label }}</a>{% else %}<span class="disabled">{{ cell.label }}</span>{% endif %}{% endfor %}</div>{% endif %}{% endfor %}
+    {% endif %}
+    <p class="subtle">浅绿色标记表示该{% if period == 'day' %}日{% elif period == 'week' %}周{% else %}月{% endif %}有已审核资料；其他日期也可查看空期。</p>
+  </div>
 </section>
+{% if period == 'day' %}
+<section class="panel">
+  {% if cards %}<p class="muted">本期 {{ cards | length }} 件事。点击标题可查看卡片、来源与相关知识点。</p>
+  <nav aria-label="本期目录"><ol>{% for card in cards %}<li><a href="#daily-{{ loop.index }}">{{ card.title }}</a></li>{% endfor %}</ol></nav>
+  <div class="public-card-list">{% for card in cards %}<div id="daily-{{ loop.index }}">{% include '_public_daily_card.html' %}</div>{% endfor %}</div>
+  {% else %}<p class="muted">这一天暂无已审核通过的卡片。</p>{% endif %}
+</section>
+{% else %}
 <section class="panel public-report-body">
   {% if selected %}
   <p class="subtle">基于 {{ total }} 张已审核卡片{% if in_progress %} · 本期进行中{% endif %}{% if first_partial_week %} · 首周仅收录 2026-07-01 起的内容{% endif %}{% if report %} · {{ 'AI 自动总结' if report.source == 'site_ai' else '编辑整理' }} · 更新于 {{ report.generated_at }}{% endif %}</p>
   {% if report %}
     <p class="report-lead">{{ report.lead }}</p>
+    {% if revisions %}<div class="report-revisions"><strong>修订记录</strong><ul>{% for item in revisions %}<li>{{ item.resolved_at[:10] }} · {{ item.summary }}</li>{% endfor %}</ul></div>{% endif %}
     <h2>重点结论与趋势</h2>
     <ol class="report-highlights">
       {% for item in report.highlights %}
@@ -42,9 +54,17 @@
       {% endfor %}
     </ul>
     {% endif %}
+    <div class="correction-panel"><h2>这份总结有误？</h2><p class="muted">免登录提交，管理员完成修正后才公开修订说明。</p>
+      {% if request.query_params.get('correction_sent') %}<p class="report-success" role="status">纠错已提交，感谢反馈。</p>{% endif %}
+      <form method="post" action="/public/corrections"><input type="hidden" name="kind" value="report"><input type="hidden" name="target" value="{{ period }}:{{ selected }}">
+        <input class="visually-hidden" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <label>问题与依据<textarea name="message" minlength="10" maxlength="2000" rows="4" required placeholder="请指出具体结论和可核对的依据"></textarea></label><button type="submit">提交纠错</button>
+      </form>
+    </div>
   {% elif total %}<p class="muted">{% if report_state == 'failed' %}本期总结生成失败，等待下次定时更新。{% elif report_state == 'outdated' %}本期资料已变化，旧总结失效，等待更新。{% else %}本期总结尚未生成，等待下次定时更新。{% endif %}已审核资料仍可通过下方入口查阅。</p>
   {% else %}<p class="muted">这个周期暂无已审核通过的卡片。</p>{% endif %}
   <a class="button-link report-all-link" href="{{ all_url }}">查看本期全部资料</a>
   {% else %}<p class="muted">目前暂无可总结的已审核卡片。</p>{% endif %}
 </section>
+{% endif %}
 {% endblock %}

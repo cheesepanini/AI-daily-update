@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar"><div><h1>公开纠错审核</h1><p class="muted">提交内容仅供管理员核对；实际修正后填写公开说明。不会公开访客原文。</p></div></section>
+{% if request.query_params.get('handled') %}<p class="report-message report-success" role="status">审核结果已保存。</p>{% endif %}
+{% if request.query_params.get('card_saved') %}<p class="report-message report-success" role="status">卡片内容已保存，请确认修正是否充分后再完成审核。</p>{% endif %}
+{% if not corrections %}<section class="panel"><p class="muted">暂无纠错提交。</p></section>{% endif %}
+{% for item in corrections %}
+{% if item.kind == 'report' %}{% set period, day = item.target.split(':', 1) %}{% endif %}
+<article class="panel correction-review">
+  <div class="panel-head"><div><p class="section-kicker">{{ 'CARD' if item.kind == 'card' else 'REPORT' }}</p><h2>{{ item.target if item.kind == 'card' else ('周报' if period == 'week' else '月报') ~ ' · ' ~ day }}</h2></div><span class="status {{ 'accepted' if item.status == 'resolved' else 'later' }}">{{ {'pending': '待审核', 'resolved': '已修订', 'dismissed': '不采纳'}.get(item.status, item.status) }}</span></div>
+  <p class="subtle">提交于 {{ item.created_at }}</p><p class="correction-message">{{ item.message }}</p>
+  {% if item.kind == 'card' %}<p><a href="/cards/{{ item.target | urlencode }}">打开管理卡片</a> · <a href="/public/cards/{{ item.target | urlencode }}">查看公开页</a></p>
+  {% elif ':' in item.target %}<p><a href="/reports?period={{ period }}&day={{ day }}">打开报告编辑</a> · <a href="/public/reports?period={{ period }}&day={{ day }}">查看公开页</a></p>{% endif %}
+  {% if item.status == 'pending' %}
+    {% if item.kind == 'card' and item.card %}
+    <details><summary>编辑卡片标题、来源与正文</summary><form method="post" action="/actions/correction-card-save" class="correction-edit-form">
+      <input type="hidden" name="correction_id" value="{{ item.id }}"><input type="hidden" name="current_hash" value="{{ item.current_hash }}">
+      <label>标题<input name="title" maxlength="200" value="{{ item.card.metadata.get('title_zh', '') }}" required></label>
+      <label>原文链接<input name="source_url" type="url" value="{{ item.card.metadata.get('source_url', '') }}"></label>
+      <label>卡片 Markdown 正文<textarea name="content" rows="12" required>{{ item.card.content }}</textarea></label>
+      <button type="submit">保存卡片修正</button>
+    </form></details>
+    {% endif %}
+    <form method="post" action="/actions/correction-decision" class="correction-decision-form">
+      <input type="hidden" name="correction_id" value="{{ item.id }}">
+      <label>公开修订说明 <span class="subtle">完成修正后填写，5 至 200 字</span><input name="summary" maxlength="200" placeholder="例如：修正了模型发布时间与原文链接"></label>
+      <div class="actions"><button name="decision" value="resolved" type="submit" {% if not item.public_valid or item.current_hash == item.original_hash %}disabled{% endif %}>确认已修订</button><button name="decision" value="dismissed" type="submit">不采纳</button></div>
+      {% if not item.public_valid %}<p class="muted">当前内容不可公开或总结已失效，需先修订。</p>{% elif item.current_hash == item.original_hash %}<p class="muted">内容尚未变化，不能标记已修订。</p>{% endif %}
+    </form>
+  {% elif item.status == 'resolved' %}<p class="subtle">修订于 {{ item.resolved_at }} · {{ item.summary }}</p>{% endif %}
+</article>
+{% endfor %}
+{% endblock %}

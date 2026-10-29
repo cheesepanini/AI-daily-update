@@ -21,6 +21,7 @@
           <a href="/trends" {% if request.url.path == '/trends' %}aria-current="page"{% endif %}>趋势</a>
           <a href="/preferences" {% if request.url.path == '/preferences' %}aria-current="page"{% endif %}>偏好学习</a>
           <a href="/model-settings" {% if request.url.path == '/model-settings' %}aria-current="page"{% endif %}>模型配置</a>
+          <a href="/corrections" {% if request.url.path == '/corrections' %}aria-current="page"{% endif %}>公开纠错</a>
           <form class="nav-form" method="post" action="/logout">
             <button type="submit">退出</button>
           </form>

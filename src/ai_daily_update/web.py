@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from calendar import monthrange
+from calendar import Calendar, monthrange
 import csv
 import json
 import logging
@@ -20,7 +20,7 @@ from urllib.parse import urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
@@ -39,6 +39,12 @@ from ai_daily_update.api.schemas import (
     PublicMetaResponse,
 )
 from ai_daily_update.config import Settings, load_settings
+from ai_daily_update.ai_links import AI_LINKS
+from ai_daily_update.feeds import render_feed
+from ai_daily_update.feedback.corrections import (
+    card_fingerprint, decide_correction, public_revisions, read_corrections,
+    report_fingerprint, submit_correction,
+)
 from ai_daily_update.learning import PRESET_GOALS, item_by_id, load_catalog, plan_for_targets, preset_plan, public_item, search_items
 from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.processors.concepts import match_foundational_concepts
@@ -60,7 +66,8 @@ from ai_daily_update.reports.public_period import (
 from ai_daily_update.source_proposals import read_source_proposals
 from ai_daily_update.storage import db
 from ai_daily_update.storage.indexer import rebuild_index
-from ai_daily_update.storage.markdown import iter_cards, read_card, update_metadata
+from ai_daily_update.storage.markdown import iter_cards, read_card, update_metadata, write_card
+from ai_daily_update.utils.lock import exclusive_file_lock
 from ai_daily_update.trends import (
     trend_count,
     trend_group_count,
@@ -299,7 +306,14 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
                 return JSONResponse({"error": "invalid_origin"}, status_code=403)
         if path == "/login" or path.startswith("/static/"):
             return await call_next(request)
-        if request.method == "GET" and (path == "/" or path == "/public" or path.startswith("/public/") or path == "/learn" or path.startswith("/learn/")):
+        if request.method == "POST" and path == "/public/corrections":
+            origin = request.headers.get("origin")
+            if request.headers.get("sec-fetch-site") == "cross-site" or (
+                origin and not admin_origin_allowed(origin, request.headers.get("host", ""), request.url.scheme == "https")
+            ):
+                return JSONResponse({"error": "invalid_origin"}, status_code=403)
+            return await call_next(request)
+        if request.method == "GET" and (path == "/" or path == "/public" or path.startswith("/public/") or path.startswith("/feeds/") or path == "/learn" or path.startswith("/learn/")):
             return await call_next(request)
         if request.method == "GET" and (
             path in {"/api/v1/meta", "/api/v1/cards", "/api/v1/learning/concepts"}
@@ -433,6 +447,7 @@ def create_app(root: Path | None = None) -> FastAPI:
     app.state.learning_ready = learning_ready
     app.state.learning_requests = {"lock": threading.Lock(), "by_ip": {}}
     app.state.login_attempts = {"lock": threading.Lock(), "attempts": {}}
+    app.state.correction_requests = {"lock": threading.Lock(), "by_ip": {}}
     app.mount(
         "/static",
         StaticFiles(directory=str(PACKAGE_ROOT / "static")),
@@ -699,16 +714,109 @@ def create_app(root: Path | None = None) -> FastAPI:
         )
 
     @app.get("/public/daily", response_class=HTMLResponse)
-    def public_daily_latest(request: Request, day: str = "") -> HTMLResponse:
-        return public_daily_response(request, settings, day)
+    def public_daily_latest(request: Request, day: str = "", calendar: str = "") -> HTMLResponse:
+        return public_daily_response(request, settings, day, calendar)
 
     @app.get("/public/daily/{day}", response_class=HTMLResponse)
-    def public_daily_day(request: Request, day: str) -> HTMLResponse:
-        return public_daily_response(request, settings, day)
+    def public_daily_day(request: Request, day: str, calendar: str = "") -> HTMLResponse:
+        return public_daily_response(request, settings, day, calendar)
 
     @app.get("/public/reports", response_class=HTMLResponse)
-    def public_reports(request: Request, period: str = "week", day: str = "") -> HTMLResponse:
-        return public_report_response(request, settings, period, day)
+    def public_reports(request: Request, period: str = "week", day: str = "", calendar: str = "") -> HTMLResponse:
+        return (public_daily_response(request, settings, day, calendar) if period == "day"
+                else public_report_response(request, settings, period, day, calendar))
+
+    @app.get("/public/ai-links", response_class=HTMLResponse)
+    def public_ai_links(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, "public_ai_links.html", {
+            "request": request, "links": AI_LINKS,
+            "categories": ("对话与搜索", "编程", "绘图", "视频"),
+            "is_admin": auth_session_valid(request, settings),
+        })
+
+    @app.get("/public/follows", response_class=HTMLResponse)
+    def public_follows(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, "public_follows.html", {
+            "request": request, "topics": topic_options(settings.topics),
+            "is_admin": auth_session_valid(request, settings),
+        })
+
+    @app.get("/public/follow-items")
+    def public_follow_items(request: Request, page: int = 1) -> JSONResponse:
+        topics = {value for value in request.query_params.getlist("topic")[:20] if len(value) <= 80}
+        keywords = {value.strip().casefold() for value in request.query_params.getlist("keyword")[:20] if 0 < len(value.strip()) <= 80}
+        sources = {value.strip().casefold() for value in request.query_params.getlist("source")[:20] if 0 < len(value.strip()) <= 80}
+        if not (topics or keywords or sources):
+            return JSONResponse({"items": [], "has_next": False})
+        matched = [card for card in public_cards(settings) if card["status"] == "accepted" and (
+            topics.intersection(card["topics"]) or
+            any(term in card["search_text"] for term in keywords) or
+            any(term in f"{card['source_label']} {card['source_url']}".casefold() for term in sources)
+        )]
+        if page > 1000:
+            return JSONResponse({"items": [], "has_next": False})
+        offset = (max(page, 1) - 1) * 50
+        return JSONResponse({"items": [{
+            "id": card["id"], "title": card["title"], "event_date": card["event_date"],
+            "source_label": card["source_label"], "conclusion": card["conclusion"],
+            "version": hashlib.sha256("|".join((card["title"], card["source_url"], card["event_date"], card["search_fields"]["body"])).encode()).hexdigest()[:16],
+        } for card in matched[offset:offset + 50]], "has_next": len(matched) > offset + 50})
+
+    @app.get("/feeds/{collection}.{kind}")
+    def public_feed(request: Request, collection: str, kind: str) -> Response:
+        if collection not in {"featured", "reports"} or kind not in {"rss", "json"}:
+            return Response(status_code=404)
+        origin = str(request.base_url).rstrip("/")
+        if collection == "featured":
+            cards = [card for card in public_cards(settings) if card["status"] == "accepted" and normalize_iso_date(card["event_date"])]
+            items = [{"title": card["title"], "url": origin + card["public_detail_url"],
+                      "summary": card["conclusion"] or card["event_overview"],
+                      "date": card["event_date"] + "T00:00:00"} for card in cards[:50]]
+            home, title = origin + "/public/featured", "AI消息速览 · 精选"
+        else:
+            items = published_report_items(settings, origin)[:50]
+            home, title = origin + "/public/reports", "AI消息速览 · 周/月总结"
+        body, media_type = render_feed(items, title, home, origin + str(request.url.path), kind, settings.timezone)
+        return Response(body, media_type=media_type.split(";")[0], headers={"Cache-Control": "no-store"})
+
+    @app.post("/public/corrections")
+    def public_correction(request: Request, kind: str = Form(...), target: str = Form(...),
+                          message: str = Form(...), website: str = Form(default="")) -> Response:
+        message = message.strip()
+        if website or not 10 <= len(message) <= 2000:
+            return HTMLResponse("纠错说明须为 10 至 2000 字。", status_code=400)
+        if kind == "card":
+            path = find_card_path_by_id(settings, target)
+            if not path:
+                return HTMLResponse("卡片不可公开查看。", status_code=404)
+            card = read_card(path)
+            if card.metadata.get("review_status") not in {"accepted", "needs-review", "later"}:
+                return HTMLResponse("卡片不可公开查看。", status_code=404)
+            current_hash = card_fingerprint(card.metadata, card.content)
+            return_to = f"/public/cards/{target}?correction_sent=1"
+        elif kind == "report" and ":" in target:
+            period, day = target.split(":", 1)
+            context = period_report_context(settings, period, day)
+            if not context or not context["report"] or str(context["selected"]) != day:
+                return HTMLResponse("总结已失效或不存在。", status_code=404)
+            current_hash = report_fingerprint(context["report"])
+            return_to = f"/public/reports?period={period}&day={day}&correction_sent=1"
+        else:
+            return HTMLResponse("纠错目标无效。", status_code=400)
+        state = app.state.correction_requests
+        ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        with state["lock"]:
+            state["by_ip"] = {key: [t for t in values if now - t < 3600]
+                              for key, values in state["by_ip"].items() if values and now - values[-1] < 3600}
+            recent = state["by_ip"].setdefault(ip, [])
+            if len(recent) >= 5:
+                return HTMLResponse("提交过于频繁，请稍后再试。", status_code=429)
+            recent.append(now)
+        correction_id = submit_correction(settings.root, kind, target, message, current_hash, now_iso(settings.timezone))
+        append_feedback_event(settings.root, settings.timezone, "public_correction", kind, target,
+                              "submitted", actor="visitor", metadata={"correction_id": correction_id})
+        return RedirectResponse(return_to, status_code=303)
 
     @app.get("/reports", response_class=HTMLResponse)
     def admin_reports(request: Request, period: str = "week", day: str = "") -> HTMLResponse:
@@ -768,6 +876,84 @@ def create_app(root: Path | None = None) -> FastAPI:
                 logging.getLogger(__name__).exception("Manual report regeneration failed")
                 error = "重新生成失败，请检查模型配置或稍后重试。"
         return templates.TemplateResponse(request, "reports.html", {"request": request, **context, "error": error}, status_code=400)
+
+    @app.get("/corrections", response_class=HTMLResponse)
+    def admin_corrections(request: Request) -> HTMLResponse:
+        items = list(reversed(read_corrections(settings.root)))
+        for item in items:
+            if item.get("kind") == "card":
+                path = find_card_path_by_id(settings, item.get("target", ""))
+                if path:
+                    card = read_card(path)
+                    item["current_hash"] = card_fingerprint(card.metadata, card.content)
+                    item["card"] = card
+                    item["public_valid"] = card.metadata.get("review_status") in {"accepted", "needs-review", "later"}
+            elif item.get("kind") == "report" and ":" in item.get("target", ""):
+                period, day = item["target"].split(":", 1)
+                context = period_report_context(settings, period, day)
+                if context and context["report"]:
+                    item["current_hash"] = report_fingerprint(context["report"])
+                    item["public_valid"] = True
+        return templates.TemplateResponse(request, "corrections.html", {
+            "request": request, "corrections": items,
+        })
+
+    @app.post("/actions/correction-card-save")
+    def save_corrected_card(correction_id: str = Form(...), title: str = Form(...),
+                            source_url: str = Form(default=""), content: str = Form(...),
+                            current_hash: str = Form(...)) -> Response:
+        item = next((value for value in read_corrections(settings.root)
+                     if value.get("id") == correction_id and value.get("status") == "pending" and value.get("kind") == "card"), None)
+        if not item:
+            return HTMLResponse("纠错记录不存在或已处理。", status_code=404)
+        title, source_url = title.strip(), source_url.strip()
+        if not 1 <= len(title) <= 200 or not 10 <= len(content) <= 50000 or (source_url and not safe_source_url(source_url)):
+            return HTMLResponse("标题、来源链接或正文格式无效。", status_code=400)
+        path = find_card_path_by_id(settings, item["target"])
+        if not path:
+            return HTMLResponse("卡片不存在。", status_code=404)
+        with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
+            card = read_card(path)
+            if card_fingerprint(card.metadata, card.content) != current_hash:
+                return HTMLResponse("卡片内容已变化，请刷新审核页。", status_code=409)
+            metadata = {**card.metadata, "title_zh": title, "source_url": source_url}
+            write_card(path, metadata, content)
+        rebuild_index(settings.markdown_root, settings.sqlite_path)
+        append_feedback_event(settings.root, settings.timezone, "public_correction", "card", item["target"],
+                              "card_updated", actor="admin", metadata={"correction_id": correction_id})
+        return RedirectResponse("/corrections?card_saved=1", status_code=303)
+
+    @app.post("/actions/correction-decision")
+    def correction_decision(correction_id: str = Form(...), decision: str = Form(...),
+                            summary: str = Form(default="")) -> Response:
+        item = next((value for value in read_corrections(settings.root)
+                     if value.get("id") == correction_id and value.get("status") == "pending"), None)
+        if not item or decision not in {"resolved", "dismissed"}:
+            return HTMLResponse("纠错记录或操作无效。", status_code=400)
+        summary = summary.strip()
+        if decision == "resolved":
+            if not 5 <= len(summary) <= 200:
+                return HTMLResponse("请填写 5 至 200 字的公开修订说明。", status_code=400)
+            if item["kind"] == "card":
+                path = find_card_path_by_id(settings, item["target"])
+                if not path:
+                    return HTMLResponse("卡片已不可用。", status_code=409)
+                card = read_card(path)
+                if card.metadata.get("review_status") not in {"accepted", "needs-review", "later"}:
+                    return HTMLResponse("卡片已不可公开查看。", status_code=409)
+                current_hash = card_fingerprint(card.metadata, card.content)
+            else:
+                period, day = item["target"].split(":", 1)
+                context = period_report_context(settings, period, day)
+                if not context or not context["report"]:
+                    return HTMLResponse("报告已失效，请先完成修订或重新生成。", status_code=409)
+                current_hash = report_fingerprint(context["report"])
+            if current_hash == item["original_hash"]:
+                return HTMLResponse("内容尚未发生修正，不能标记为已修订。", status_code=409)
+        if decide_correction(settings.root, correction_id, decision, summary, now_iso(settings.timezone)):
+            append_feedback_event(settings.root, settings.timezone, "public_correction", item["kind"], item["target"],
+                                  decision, actor="admin", metadata={"correction_id": correction_id})
+        return RedirectResponse("/corrections?handled=1", status_code=303)
 
     @app.get("/public/starred", response_class=HTMLResponse)
     def public_starred(request: Request) -> HTMLResponse:
@@ -841,6 +1027,7 @@ def create_app(root: Path | None = None) -> FastAPI:
                 "learning_match_pending": "learning_concept_ids" not in card.metadata,
                 "learning_news_reviewed": learning_news_reviewed(card.metadata),
                 "event_sources": event_sources(item, public_cards(settings)),
+                "revisions": public_revisions(settings.root, "card", card_id),
                 "topic_labels": {option["id"]: option["label"] for option in topic_options(settings.topics)},
             },
         )
@@ -1074,9 +1261,11 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "duplicate_suspect": metadata.get("duplicate_suspect"),
                     "first_party": metadata.get("first_party") is True,
                     "event_group_id": str(metadata.get("event_group_id") or ""),
+                    "research_links": metadata.get("research_links") if isinstance(metadata.get("research_links"), dict) else {},
                     "path": path,
                 },
                 "content_html": markdown_renderer.render(card.content),
+                "content_markdown": card.content,
                 "review_note": latest_card_review_note(
                     settings.markdown_root, str(metadata.get("id", path.stem))
                 ),
@@ -1238,6 +1427,27 @@ def create_app(root: Path | None = None) -> FastAPI:
                     update_metadata(target_path, {"event_group_id": group_id})
         update_metadata(path, {"first_party": first_party == "true", "event_group_id": group_id})
         return RedirectResponse(f"/cards/{card_id}", status_code=303)
+
+    @app.post("/actions/research-links")
+    def save_research_links(card_id: str = Form(...), paper_url: str = Form(default=""),
+                            code_url: str = Form(default=""), model_url: str = Form(default=""),
+                            dataset_url: str = Form(default=""), confirmed: str = Form(default="")) -> Response:
+        path = find_card_path_by_id(settings, card_id)
+        if not path:
+            return HTMLResponse("卡片不存在。", status_code=404)
+        card = read_card(path)
+        if card.metadata.get("track") != "academic":
+            return HTMLResponse("仅学术前沿卡片可设置研究资料链接。", status_code=400)
+        links = {key: value.strip() for key, value in (
+            ("paper", paper_url), ("code", code_url), ("model", model_url), ("dataset", dataset_url)
+        ) if value.strip()}
+        if any(len(value) > 1000 or not safe_source_url(value) for value in links.values()):
+            return HTMLResponse("研究资料链接必须是有效的 HTTP(S) 地址。", status_code=400)
+        if links and confirmed != "yes":
+            return HTMLResponse("请逐项核对链接后再确认保存。", status_code=400)
+        update_metadata(path, {"research_links": links,
+                               "research_links_reviewed_at": now_iso(settings.timezone) if links else ""})
+        return RedirectResponse(f"/cards/{card_id}?links_saved=1", status_code=303)
 
     @app.post("/actions/delete-card")
     def action_delete_card(
@@ -1940,16 +2150,22 @@ def public_cards_response(
     )
 
 
-def public_daily_response(request: Request, settings: Settings, day: str = "") -> HTMLResponse:
+def public_daily_response(request: Request, settings: Settings, day: str = "", calendar: str = "") -> HTMLResponse:
     cards = filter_public_cards(public_cards(settings), status="accepted")
     days = sorted({card["event_date"] for card in cards if normalize_iso_date(card["event_date"])}, reverse=True)
     today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
     selected = day or next((available_day for available_day in days if available_day <= today), days[0] if days else "")
     if day and (normalize_iso_date(day) != day):
         return HTMLResponse("日期格式应为 YYYY-MM-DD。", status_code=404)
+    picker = report_calendar_picker("day", date.fromisoformat(selected) if selected else None,
+                                    {date.fromisoformat(value) for value in days},
+                                    date.fromisoformat(today), calendar)
+    if picker is None:
+        return HTMLResponse("日历月份无效。", status_code=404)
     daily_cards = group_public_cards([card for card in cards if card["event_date"] == selected])
-    return templates.TemplateResponse(request, "public_daily.html", {
-        "request": request, "day": selected, "days": days, "cards": daily_cards,
+    return templates.TemplateResponse(request, "public_reports.html", {
+        "request": request, "period": "day", "day": selected, "selected": selected,
+        "cards": daily_cards, "picker": picker,
         "is_admin": auth_session_valid(request, settings),
     })
 
@@ -1970,6 +2186,7 @@ def period_report_context(settings: Settings, period: str = "week", day: str = "
         if normalize_iso_date(card["event_date"]) and FIRST_DAY <= date.fromisoformat(card["event_date"]) <= today
     ]
     starts = sorted({public_period_start(value, period) for _, value in dated}, reverse=True)
+    available_starts = set(starts)
     selected = public_period_start(requested, period) if requested else (starts[0] if starts else None)
     if selected and selected not in starts:
         starts = sorted([*starts, selected], reverse=True)
@@ -1990,19 +2207,101 @@ def period_report_context(settings: Settings, period: str = "week", day: str = "
         card["evidence_text"] = "\n".join(dict.fromkeys(part for part in parts if part))[:400] or card.get("search_fields", {}).get("body", "")[:400]
     return {
         "period": period, "selected": selected, "end": end, "period_cards": period_cards,
-        "periods": starts, "report": report, "report_state": report_state, "total": len(period_cards),
+        "periods": starts, "available_periods": available_starts,
+        "report": report, "report_state": report_state, "total": len(period_cards),
         "in_progress": bool(end and end >= today), "first_partial_week": bool(selected and selected < FIRST_DAY),
         "all_url": all_url,
     }
 
 
-def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "") -> HTMLResponse:
+def public_report_response(request: Request, settings: Settings, period: str = "week", day: str = "", calendar: str = "") -> HTMLResponse:
     context = period_report_context(settings, period, day)
     if context is None:
         return HTMLResponse("汇总周期或日期无效。", status_code=404)
+    picker = report_calendar_picker(period, context["selected"], context["available_periods"],
+                                    datetime.now(ZoneInfo(settings.timezone)).date(), calendar)
+    if picker is None:
+        return HTMLResponse("日历月份无效。", status_code=404)
     return templates.TemplateResponse(request, "public_reports.html", {
-        "request": request, **context, "is_admin": auth_session_valid(request, settings),
+        "request": request, **context, "picker": picker, "is_admin": auth_session_valid(request, settings),
+        "revisions": public_revisions(settings.root, "report", f"{period}:{context['selected']}") if context["report"] else [],
     })
+
+
+def report_calendar_picker(period: str, selected: date | None, available: set[date],
+                           today: date, calendar: str = "") -> dict[str, Any] | None:
+    if calendar and (not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", calendar)):
+        return None
+    try:
+        anchor = date.fromisoformat(f"{calendar}-01") if calendar else (selected or today).replace(day=1)
+    except ValueError:
+        return None
+    first = FIRST_DAY
+    last = max(today, *available) if period == "day" and available else today
+    if period == "month":
+        if not first.year <= anchor.year <= last.year:
+            return None
+    elif not (public_period_start(first, "week") if period == "week" else first).replace(day=1) <= anchor <= last.replace(day=1):
+        return None
+    def url(chosen: date | None = None, view: date | None = None) -> str:
+        params = {"period": period}
+        if chosen or selected:
+            params["day"] = (chosen or selected).isoformat()
+        if view:
+            params["calendar"] = view.strftime("%Y-%m")
+        return "/public/reports?" + urlencode(params)
+    if period == "month":
+        year = anchor.year
+        months = []
+        for month in range(1, 13):
+            value = date(year, month, 1)
+            enabled = value <= last and value.replace(day=monthrange(year, month)[1]) >= first
+            months.append({"label": f"{month} 月", "url": url(value) if enabled else "",
+                           "active": value == selected, "available": value in available})
+        previous = date(year - 1, 1, 1) if year > first.year else None
+        following = date(year + 1, 1, 1) if year < last.year else None
+        return {"heading": f"{year} 年", "months": months, "weeks": [],
+                "previous": url(view=previous) if previous else "",
+                "following": url(view=following) if following else ""}
+    weeks = []
+    for values in Calendar().monthdatescalendar(anchor.year, anchor.month):
+        start, end = values[0], values[-1]
+        weeks.append({"days": [{"label": value.day, "date": value.isoformat(), "in_month": value.month == anchor.month,
+                                  "active": value == selected, "available": value in available,
+                                  "url": url(value) if period == "day" and first <= value <= last else ""}
+                                 for value in values],
+                      "url": url(start) if period == "week" and end >= first and start <= last else "",
+                      "active": start == selected, "available": start in available,
+                      "label": f"{start.month}月{start.day}日—{end.month}月{end.day}日"})
+    previous = (anchor - timedelta(days=1)).replace(day=1) if anchor > first.replace(day=1) else None
+    following = date(anchor.year + (anchor.month == 12), anchor.month % 12 + 1, 1) if anchor < last.replace(day=1) else None
+    return {"heading": anchor.strftime("%Y 年 %m 月"), "months": [], "weeks": weeks,
+            "previous": url(view=previous) if previous else "",
+            "following": url(view=following) if following else ""}
+
+
+def published_report_items(settings: Settings, origin: str) -> list[dict[str, str]]:
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    accepted = [card for card in public_cards(settings) if card["status"] == "accepted"
+                and normalize_iso_date(card["event_date"])
+                and FIRST_DAY <= date.fromisoformat(card["event_date"]) <= today]
+    items = []
+    for period in ("week", "month"):
+        groups: dict[date, list[dict[str, Any]]] = {}
+        for card in accepted:
+            groups.setdefault(public_period_start(date.fromisoformat(card["event_date"]), period), []).append(card)
+        for start, members in groups.items():
+            report = read_report(settings.markdown_root, period, start, members)
+            if report:
+                published = str(report.get("generated_at") or start.isoformat())
+                try:
+                    datetime.fromisoformat(published)
+                except ValueError:
+                    published = start.isoformat()
+                items.append({"title": f"AI {'周报' if period == 'week' else '月报'} · {start}",
+                              "url": f"{origin}/public/reports?period={period}&day={start}",
+                              "summary": report["lead"], "date": published})
+    return sorted(items, key=lambda item: item["date"], reverse=True)
 
 
 def public_period_start(value: date, period: str) -> date:
@@ -2204,6 +2503,11 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
         "deleted_at": str(metadata.get("deleted_at", "")),
         "source_url": source_url,
         "source_label": source,
+        "research_links": {
+            key: safe_source_url(value) for key, value in (metadata.get("research_links") or {}).items()
+            if key in {"paper", "code", "model", "dataset"} and safe_source_url(value)
+        } if metadata.get("track") == "academic" and metadata.get("review_status") == "accepted"
+             and metadata.get("research_links_reviewed_at") and isinstance(metadata.get("research_links"), dict) else {},
         "detail_url": f"/cards/{metadata.get('id', path.stem)}",
         "public_detail_url": f"/public/cards/{metadata.get('id', path.stem)}",
         "topics": metadata.get("topics", []),
