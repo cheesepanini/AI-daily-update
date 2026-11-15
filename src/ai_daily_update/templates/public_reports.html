@@ -42,7 +42,7 @@
       {% for item in report.highlights %}
       <li>
         <p>{{ item.text }}</p>
-        <div class="report-evidence">依据：{% for card in item.sources %}<a href="/public/cards/{{ card.id }}">{{ card.title }}</a>{% if card.source_url %} <a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        {% include '_public_report_evidence.html' %}
         {% with images=item.images %}{% include '_news_image_group.html' %}{% endwith %}
       </li>
       {% endfor %}
@@ -51,7 +51,8 @@
     <h2>后续关注</h2>
     <ul class="report-watch">
       {% for item in report.watch %}
-      <li>{{ item.text }} <span class="report-evidence">依据：{% for card in item.sources %}<a href="/public/cards/{{ card.id }}">{{ card.title }}</a>{% if card.source_url %} <a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+      <li>{{ item.text }}
+        {% include '_public_report_evidence.html' %}
         {% with images=item.images %}{% include '_news_image_group.html' %}{% endwith %}
       </li>
       {% endfor %}

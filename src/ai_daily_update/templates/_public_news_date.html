@@ -1,0 +1,5 @@
+<div class="public-card-date">
+  <strong>{% if card.confirmed_event_date %}事件时间 <time datetime="{{ card.confirmed_event_date }}">{{ card.confirmed_event_date }}</time>{% else %}事件时间待核实{% endif %}</strong>
+  <small>报道时间 {% if card.reported_date %}<time datetime="{{ card.reported_date }}">{{ card.reported_date }}</time>{% else %}待核实{% endif %}</small>
+  {% if card.legacy_date %}<small>旧记录日期 · 待核实 {{ card.legacy_date }}</small>{% endif %}
+</div>

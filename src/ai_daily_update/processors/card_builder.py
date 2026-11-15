@@ -95,17 +95,22 @@ def build_card_metadata(candidate: Candidate, day: date, timezone: str) -> dict:
 
 
 def apply_source_evidence(metadata: dict, candidate: Candidate, document: SourceDocument) -> None:
-    dates = metadata["news_dates"]
-    published = parse_source_date(document.published)
-    if published:
-        dates.update(reported=published.isoformat(), reported_basis="原文发布时间")
-    event = parse_date_from_text(document.event_date_text)
-    if event and not candidate.digest_item_index:
-        dates.update(event=event.isoformat(), event_basis=document.event_date_text[:180])
+    metadata["news_dates"].update(source_news_dates(document, bool(candidate.digest_item_index)))
     if document.images:
         metadata["image_candidates"] = list(document.images)
         metadata["image_candidates_page"] = candidate.parent_url or candidate.url
         metadata["image_candidates_source"] = candidate.url
+
+
+def source_news_dates(document: SourceDocument, digest_item: bool = False) -> dict[str, str]:
+    dates = {}
+    published = parse_source_date(document.published)
+    if published:
+        dates.update(reported=published.isoformat(), reported_basis="原文发布时间")
+    event = parse_date_from_text(document.event_date_text)
+    if event and not digest_item:
+        dates.update(event=event.isoformat(), event_basis=document.event_date_text[:180])
+    return dates
 
 
 def source_type_for_candidate(candidate: Candidate) -> str:

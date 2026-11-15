@@ -159,6 +159,8 @@ def _document_from_entry(entry: ET.Element, requested_id: str | None = None) -> 
         title=title,
         description=summary,
         text="\n".join(text_lines),
+        published=published,
+        event_date_text=f"arXiv 首版发布 {published[:10]}" if published and arxiv_id.endswith("v1") else "",
     )
 
 

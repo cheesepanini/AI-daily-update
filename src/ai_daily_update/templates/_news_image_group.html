@@ -6,6 +6,7 @@
     <figcaption>
       {% if image.card_url %}<a href="{{ image.card_url }}">{{ image.card_title }}</a> · {% endif %}
       <a href="{{ image.page }}" rel="noopener noreferrer">图源：{{ image.credit }}</a>
+      {% if image.license == 'CC BY 4.0' %} · <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener noreferrer">CC BY 4.0</a> · 本站压缩{% endif %}
     </figcaption>
   </figure>
   {% endfor %}

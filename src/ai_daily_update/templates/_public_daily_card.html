@@ -1,4 +1,5 @@
 <article class="public-daily-item">
+  {% include '_public_news_date.html' %}
   <div class="public-card-title">
     <h2><a href="{{ card.public_detail_url }}">{{ card.title }}</a></h2>
     <button class="favorite-button" type="button" data-favorite-id="{{ card.id }}" aria-pressed="false">收藏</button>

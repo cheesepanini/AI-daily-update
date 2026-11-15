@@ -1,10 +1,6 @@
 {% for card in cards %}
 <article class="public-card{% if card.images %} has-thumbnail{% endif %}">
-  <div class="public-card-date">
-    <span>{{ card.date_label }}</span>
-    {% if card.display_date %}<strong>{{ card.display_date }}</strong>{% endif %}
-    {% if card.confirmed_event_date and card.reported_date and card.reported_date != card.confirmed_event_date %}<small>报道日期 {{ card.reported_date }}</small>{% endif %}
-  </div>
+  {% include '_public_news_date.html' %}
   <div class="public-card-main">
     <div class="public-card-title">
       <a href="{{ card.public_detail_url }}">{{ card.title }}</a>

@@ -65,6 +65,27 @@ def test_download_checks_redirect_destination_and_pins_public_ip(monkeypatch):
     assert calls == [("8.8.8.8", "example.org")]
 
 
+def test_legacy_source_backfill_preserves_periods_and_manual_dates(tmp_path):
+    path = tmp_path / "news.md"
+    url = "https://arxiv.org/abs/2607.12345v1"
+    original = {"source_url": url, "date": "2026-07-07", "review_status": "accepted"}
+    write_card(path, original, "报道正文")
+    html = '<meta name="citation_online_date" content="2026/07/08"><meta property="og:image" content="/arxiv-logo-fb.png">'
+    document = extract_document_from_html(url, html)
+    assert not document.images
+    assert news_media.save_news_evidence(path, url, url, document, backfill=True) == (0, "2026-07-08")
+    assert "news_dates" not in read_card(path).metadata
+
+    document = extract_document_from_html(url, html.replace("07/08", "07/07"))
+    assert news_media.save_news_evidence(path, url, url, document, backfill=True) == (0, "")
+    metadata = read_card(path).metadata
+    assert metadata["news_dates"]["event"] == metadata["news_dates"]["reported"] == "2026-07-07"
+
+    update_metadata(path, {"news_dates": {"event": "2026-07-06", "event_basis": "人工核对"}})
+    news_media.save_news_evidence(path, url, url, document, backfill=True)
+    assert read_card(path).metadata["news_dates"] == {"event": "2026-07-06", "event_basis": "人工核对"}
+
+
 def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir()
@@ -86,7 +107,9 @@ def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch)
     assert not BeautifulSoup(client.get("/public/featured").text, "html.parser").select(".public-card-thumbnail")
     client.post("/actions/card-event-date", data={"card_id": "sample", "review_both": "true",
                 "event_date": "", "reported_date": "2026-07-08"})
-    assert "报道日期" in client.get("/public/featured").text
+    dates = BeautifulSoup(client.get("/public/featured").text, "html.parser").select_one(".public-card-date")
+    assert dates.strong.get_text(strip=True) == "事件时间待核实"
+    assert dates.small.time["datetime"] == "2026-07-08"
     assert "配图验收样例" in client.get("/public/reports?period=day&day=2026-07-08").text
     assert "配图验收样例" not in client.get("/public/reports?period=day&day=2026-07-07").text
     members = public_cards(settings)
@@ -114,6 +137,12 @@ def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch)
     with Image.open(BytesIO(response.content)) as thumb:
         assert max(thumb.size) == 480
     assert asset in client.get("/public/featured").text
+    client.post("/actions/card-event-date", data={"card_id": "sample", "review_both": "true",
+                "event_date": "2026-07-08", "reported_date": "2026-07-08"})
+    for route in ("/public/featured", "/public/cards/sample", "/public/reports?period=day&day=2026-07-08",
+                  "/public/reports?period=week&day=2026-07-08", "/public/reports?period=month&day=2026-07-08"):
+        date_block = BeautifulSoup(client.get(route).text, "html.parser").select_one(".public-card-date")
+        assert date_block.strong.time["datetime"] == date_block.small.time["datetime"] == "2026-07-08"
     assert "现场摄影" in client.get("/public/cards/sample").text
     assert "现场摄影" in client.get("/public/reports?period=day&day=2026-07-08").text
     for period in ("week", "month"):

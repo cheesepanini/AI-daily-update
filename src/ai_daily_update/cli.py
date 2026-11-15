@@ -843,17 +843,21 @@ def index_command() -> None:
 
 
 @app.command("news-media-audit")
-def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Fetch candidates for recent featured cards.")) -> None:
+def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Backfill source evidence for recent featured cards.")) -> None:
     """List unchecked dates and recent cards awaiting image review."""
-    import time
+    from concurrent.futures import ThreadPoolExecutor
+
     import urllib3
-    from ai_daily_update.news_media import approved_images, card_source_page, image_candidates, refresh_image_candidates
+    from ai_daily_update.news_media import (
+        approved_images, card_source_page, fetch_news_evidence, image_candidates, save_news_evidence,
+    )
 
     settings = _settings()
     today = today_in_timezone(settings.timezone)
     cutoff = (today - timedelta(days=29)).isoformat()
-    unchecked = recent = changed = failures = 0
-    for path in iter_cards(settings.markdown_root):
+    unchecked = recent = failures = moved = 0
+    pending: dict[str, list[tuple[Path, str, str | None]]] = {}
+    for path in reversed(iter_cards(settings.markdown_root)):
         metadata = read_card(path).metadata
         if metadata.get("review_status") != "accepted":
             continue
@@ -863,26 +867,46 @@ def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Fetch ca
         if not (dates["confirmed_event_date"] and dates["reported_date"]):
             unchecked += 1
             typer.echo(f"日期待核\t{current or '待归期'}\t{card_id}")
-        previous = str(metadata.get("event_date") or metadata.get("date") or "")
-        if "news_dates" not in metadata and previous != current:
-            changed += 1
-        if not cutoff <= current <= today.isoformat() or not card_source_page(metadata):
+        page = card_source_page(metadata)
+        if not cutoff <= (current or str(metadata.get("collected_date") or "")) <= today.isoformat() or not page:
             continue
         recent += 1
-        candidates = image_candidates(metadata)
-        approved = approved_images(metadata, card_id)
-        already_checked = (metadata.get("image_candidates_page") == card_source_page(metadata)
+        already_checked = (metadata.get("image_candidates_page") == page
                            and metadata.get("image_candidates_source") == metadata.get("source_url"))
         if apply and not already_checked:
+            pending.setdefault(page, []).append((path, card_id, metadata.get("source_url")))
+        else:
+            typer.echo(f"配图清单\t{current}\t候选 {len(image_candidates(metadata))}"
+                       f"\t已发布 {len(approved_images(metadata, card_id))}\t{card_id}")
+
+    def fetch_group(group):
+        page, entries = group
+        try:
+            document = fetch_news_evidence(page)
+        except (OSError, ValueError, urllib3.exceptions.HTTPError):
+            return [(card_id, None, "") for _, card_id, _ in entries]
+        results = []
+        for path, card_id, source in entries:
             try:
-                refresh_image_candidates(path)
-                candidates = image_candidates(read_card(path).metadata)
-            except (OSError, ValueError, urllib3.exceptions.HTTPError):
-                failures += 1
-                typer.echo(f"取图失败\t{card_id}", err=True)
-            time.sleep(1)
-        typer.echo(f"配图清单\t{current}\t候选 {len(candidates)}\t已发布 {len(approved)}\t{card_id}")
-    typer.echo(f"日期待核 {unchecked}；旧卡归期字段变化 {changed}；最近30天精选 {recent}；取图失败 {failures}")
+                count, corrected = save_news_evidence(path, page, source, document, backfill=True)
+                results.append((card_id, count, corrected))
+            except (OSError, ValueError):
+                results.append((card_id, None, ""))
+        return results
+
+    if pending:
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            for group in pool.map(fetch_group, pending.items()):
+                for card_id, count, corrected in group:
+                    if count is None:
+                        failures += 1
+                        typer.echo(f"原文获取或保存失败\t{card_id}", err=True)
+                    else:
+                        typer.echo(f"配图清单\t候选 {count}\t{card_id}")
+                    if corrected:
+                        moved += 1
+                        typer.echo(f"归期变更待确认\t{corrected}\t{card_id}")
+    typer.echo(f"处理前日期待核 {unchecked}；发现归期变更候选 {moved}；最近30天精选 {recent}；失败 {failures}")
 
 
 @app.command("rescore-cards")

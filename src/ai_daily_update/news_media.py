@@ -14,7 +14,10 @@ import urllib3
 from PIL import Image, ImageOps
 
 from ai_daily_update.collectors.web_page import extract_document_from_html
+from ai_daily_update.collectors.document import SourceDocument
+from ai_daily_update.processors.card_builder import source_news_dates
 from ai_daily_update.storage.markdown import read_card, write_card
+from ai_daily_update.utils.dates import public_date_fields
 from ai_daily_update.utils.lock import exclusive_file_lock
 
 
@@ -76,9 +79,12 @@ def download_public(url: str, limit: int, expected_type: str) -> tuple[str, byte
     raise ValueError("来源跳转次数过多")
 
 
-def discover_images(page_url: str) -> list[dict[str, str]]:
+def fetch_news_evidence(page_url: str) -> SourceDocument:
     url, html = download_public(page_url, 3 * 1024 * 1024, "text/html")
-    return list(extract_document_from_html(url, html).images)
+    original, final = urlsplit(page_url), urlsplit(url)
+    if original.hostname != final.hostname or original.path.rstrip("/") != final.path.rstrip("/"):
+        raise ValueError("原报道已重定向到其他页面，请人工核对")
+    return extract_document_from_html(url, html)
 
 
 def card_source_page(metadata: dict) -> str:
@@ -94,16 +100,35 @@ def image_candidates(metadata: dict) -> list[dict]:
 def refresh_image_candidates(path: Path) -> int:
     snapshot = read_card(path).metadata
     page = card_source_page(snapshot)
-    candidates = discover_images(page)
+    count, _ = save_news_evidence(path, page, snapshot.get("source_url"), fetch_news_evidence(page))
+    return count
+
+
+def save_news_evidence(path: Path, page: str, source: str | None, document: SourceDocument,
+                       *, backfill: bool = False) -> tuple[int, str]:
     with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
         card = read_card(path)
-        if card_source_page(card.metadata) != page or card.metadata.get("source_url") != snapshot.get("source_url"):
+        metadata = card.metadata
+        if card_source_page(metadata) != page or metadata.get("source_url") != source:
             raise ValueError("原报道链接已变化，请刷新卡片")
-        existing = {item["url"]: item for item in image_candidates(card.metadata)}
-        card.metadata.update(image_candidates_page=page, image_candidates_source=snapshot.get("source_url"),
-                             image_candidates=[existing.get(item["url"], item) for item in candidates])
-        write_card(path, card.metadata, card.content)
-    return len(candidates)
+        if backfill and metadata.get("review_status") != "accepted":
+            return 0, ""
+        existing = {item["url"]: item for item in image_candidates(metadata)}
+        updates = dict(image_candidates_page=page, image_candidates_source=source,
+                       image_candidates=[existing.get(item["url"], item) for item in document.images])
+        moved_date = ""
+        if backfill and "news_dates" not in metadata:
+            dates = source_news_dates(document, bool(metadata.get("digest_item_index")))
+            verified = dates.get("event") or dates.get("reported")
+            legacy = public_date_fields(metadata)["legacy_date"]
+            if verified and (not legacy or verified == legacy):
+                updates["news_dates"] = dates
+            elif verified:
+                # An editor can confirm the move and regenerate the affected reports together.
+                moved_date = verified
+        if any(metadata.get(key) != value for key, value in updates.items()):
+            write_card(path, {**metadata, **updates}, card.content)
+    return len(document.images), moved_date
 
 
 def image_path(root: Path, image_id: str, size: str) -> Path:
@@ -114,6 +139,12 @@ def image_path(root: Path, image_id: str, size: str) -> Path:
 
 def prepare_image(root: Path, url: str) -> str:
     _, data = download_public(url, MAX_IMAGE_BYTES, "image/")
+    return store_news_image(root, data)
+
+
+def store_news_image(root: Path, data: bytes) -> str:
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ValueError("来源文件超过大小限制")
     with Image.open(BytesIO(data), formats=["JPEG", "PNG", "WEBP", "GIF"]) as image:
         if image.width * image.height > 24_000_000 or min(image.size) < 80:
             raise ValueError("图片尺寸不支持")

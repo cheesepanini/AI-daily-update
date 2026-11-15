@@ -1,0 +1,12 @@
+<div class="report-evidence">
+  <span>依据</span>
+  <ul class="report-evidence-cards">
+    {% for card in item.sources %}
+    <li>
+      <a href="{{ card.public_detail_url }}">{{ card.title }}</a>
+      {% if card.source_url %}<a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}
+      {% include '_public_news_date.html' %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
