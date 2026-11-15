@@ -106,7 +106,7 @@ def source_news_dates(document: SourceDocument, digest_item: bool = False) -> di
     dates = {}
     published = parse_source_date(document.published)
     if published:
-        dates.update(reported=published.isoformat(), reported_basis="原文发布时间")
+        dates.update(reported=published.isoformat(), reported_basis=document.publication_basis or "原文发布时间")
     event = parse_date_from_text(document.event_date_text)
     if event and (not digest_item or document.event_date_text.startswith(f"{event.isoformat()} · ")):
         dates.update(event=event.isoformat(), event_basis=document.event_date_text[:180])

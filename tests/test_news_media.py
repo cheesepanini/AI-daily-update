@@ -13,6 +13,7 @@ from PIL import Image
 from ai_daily_update import news_media, web
 from ai_daily_update.collectors.web_page import extract_document_from_html
 from ai_daily_update.collectors.document import SourceDocument
+from ai_daily_update.collectors.rss import RSSItem
 from ai_daily_update.config import load_settings
 from ai_daily_update.processors.candidates import Candidate
 from ai_daily_update.processors.card_builder import apply_content_date, apply_source_evidence, build_card_metadata
@@ -156,6 +157,25 @@ def test_model_date_requires_original_quote_and_merges_with_report_date(tmp_path
                                          apply_period_changes=True)[1] == "2026-10-29"
     dates = read_card(path).metadata["news_dates"]
     assert dates["event"] == "2026-10-29" and dates["reported_basis"] == "人工核对"
+
+
+def test_openai_publisher_feed_fills_dates_only_for_exact_article(monkeypatch):
+    url = "https://openai.com/index/new-model"
+    def unavailable(*args):
+        raise ValueError("blocked article")
+    monkeypatch.setattr(news_media, "download_public", unavailable)
+    monkeypatch.setattr(news_media, "fetch_rss_feed", lambda *a, **kw: [
+        RSSItem("OpenAI", "industry", "New model", url + "/", "Fri, 13 Nov 2026 11:00:00 GMT",
+                "We’re introducing a new model."),
+    ])
+    news_media._openai_feed.cache_clear()
+    try:
+        document = news_media.fetch_news_evidence(url)
+        assert document.publication_basis == "OpenAI 官方 RSS"
+        with pytest.raises(ValueError, match="blocked article"):
+            news_media.fetch_news_evidence(url + "-other")
+    finally:
+        news_media._openai_feed.cache_clear()
 
 
 def test_arxiv_figures_crosscheck_exact_paper_and_generate_private_preview(tmp_path, monkeypatch):
