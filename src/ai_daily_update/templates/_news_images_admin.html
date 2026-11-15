@@ -1,0 +1,35 @@
+<div id="news-images" class="review-note">
+  <h2>新闻配图</h2>
+  {% if request.query_params.get('image_error') %}<p class="warning" role="status">图片操作未完成。请检查原站是否可访问、格式、预览、署名和确认状态。</p>{% endif %}
+  {% if request.query_params.get('image_count') is not none %}<p role="status">找到 {{ request.query_params.get('image_count') }} 张候选图。</p>{% endif %}
+  {% if request.query_params.get('image_saved') %}<p class="report-success" role="status">配图状态已更新。</p>{% endif %}
+  {% if card.digest_item_index %}<p class="warning">合集第 {{ card.digest_item_index }} 条。请确认图片对应本条消息。</p>{% endif %}
+  <form method="post" action="/actions/card-images">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <button name="action" value="discover">从原报道查找候选图</button>
+  </form>
+  {% for image in card.approved_images %}
+  <form method="post" action="/actions/card-images" class="news-image-review">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <input type="hidden" name="image_id" value="{{ image.id }}">
+    <img src="{{ image.thumb_url }}" alt="{{ image.caption }}" loading="lazy">
+    <p>{{ '主图' if loop.first else '已发布' }} · {{ image.credit }}</p>
+    <button name="action" value="withdraw">撤下图片</button>
+  </form>
+  {% endfor %}
+  {% for image in card.image_candidates %}
+  <form method="post" action="/actions/card-images" class="news-image-review">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <input type="hidden" name="url" value="{{ image.url }}">
+    <p class="subtle">{{ image.caption }}</p>
+    {% if image.preview %}
+    <img src="/card-image-preview/{{ card.id | urlencode }}/{{ image.preview }}" alt="{{ image.caption }}" loading="lazy">
+    <input type="hidden" name="image_id" value="{{ image.preview }}">
+    <label>图片署名 <input name="credit" maxlength="120" required placeholder="机构、作者或素材署名"></label>
+    <label><input type="checkbox" name="confirmed" value="true" required> 我已确认可转载，且图片对应这条消息</label>
+    <label><input type="checkbox" name="main" value="true"> 设为列表主图</label>
+    <button name="action" value="publish">发布图片</button>
+    {% else %}<button name="action" value="preview">加载候选图预览</button>{% endif %}
+  </form>
+  {% endfor %}
+</div>

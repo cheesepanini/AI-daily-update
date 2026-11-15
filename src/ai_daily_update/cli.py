@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -23,6 +23,7 @@ from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
     apply_content_date,
+    apply_source_evidence,
     build_card_metadata,
     build_placeholder_content,
     card_path,
@@ -65,7 +66,7 @@ from ai_daily_update.review.workflow import needs_review_cards, set_review_statu
 from ai_daily_update.source_proposals import generate_source_proposals
 from ai_daily_update.storage.indexer import rebuild_index
 from ai_daily_update.storage.markdown import iter_cards, read_card, write_card
-from ai_daily_update.utils.dates import today_in_timezone
+from ai_daily_update.utils.dates import public_date_fields, today_in_timezone
 from ai_daily_update.utils.paths import ensure_directories
 
 
@@ -491,6 +492,8 @@ def _run_daily_pipeline_locked(
             content_from_llm = bool(content)
             content = content or build_placeholder_content(candidate)
             metadata = apply_content_date(metadata, candidate, content)
+            if source_document:
+                apply_source_evidence(metadata, candidate, source_document)
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
             if content_from_llm and llm.available:
                 metadata.update(score_card_quality_with_llm(metadata, content, llm))
@@ -837,6 +840,49 @@ def index_command() -> None:
     typer.echo(f"Indexed {indexed} card(s).")
     for warning in warnings:
         typer.echo(f"warning: {warning}", err=True)
+
+
+@app.command("news-media-audit")
+def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Fetch candidates for recent featured cards.")) -> None:
+    """List unchecked dates and recent cards awaiting image review."""
+    import time
+    import urllib3
+    from ai_daily_update.news_media import approved_images, card_source_page, image_candidates, refresh_image_candidates
+
+    settings = _settings()
+    today = today_in_timezone(settings.timezone)
+    cutoff = (today - timedelta(days=29)).isoformat()
+    unchecked = recent = changed = failures = 0
+    for path in iter_cards(settings.markdown_root):
+        metadata = read_card(path).metadata
+        if metadata.get("review_status") != "accepted":
+            continue
+        card_id = str(metadata.get("id", path.stem))
+        dates = public_date_fields(metadata)
+        current = dates["display_date"]
+        if not (dates["confirmed_event_date"] and dates["reported_date"]):
+            unchecked += 1
+            typer.echo(f"日期待核\t{current or '待归期'}\t{card_id}")
+        previous = str(metadata.get("event_date") or metadata.get("date") or "")
+        if "news_dates" not in metadata and previous != current:
+            changed += 1
+        if not cutoff <= current <= today.isoformat() or not card_source_page(metadata):
+            continue
+        recent += 1
+        candidates = image_candidates(metadata)
+        approved = approved_images(metadata, card_id)
+        already_checked = (metadata.get("image_candidates_page") == card_source_page(metadata)
+                           and metadata.get("image_candidates_source") == metadata.get("source_url"))
+        if apply and not already_checked:
+            try:
+                refresh_image_candidates(path)
+                candidates = image_candidates(read_card(path).metadata)
+            except (OSError, ValueError, urllib3.exceptions.HTTPError):
+                failures += 1
+                typer.echo(f"取图失败\t{card_id}", err=True)
+            time.sleep(1)
+        typer.echo(f"配图清单\t{current}\t候选 {len(candidates)}\t已发布 {len(approved)}\t{card_id}")
+    typer.echo(f"日期待核 {unchecked}；旧卡归期字段变化 {changed}；最近30天精选 {recent}；取图失败 {failures}")
 
 
 @app.command("rescore-cards")

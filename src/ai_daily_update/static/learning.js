@@ -1,6 +1,6 @@
 (() => {
   const key = "ai-learning-v1";
-  const initial = { goal_id: "", goal_text: "", background: "beginner", read: [], verified: [], history: [] };
+  const initial = { goal_text: "", read: [], verified: [], history: [] };
   let state;
   try { state = { ...initial, ...JSON.parse(localStorage.getItem(key) || "{}") }; }
   catch { state = { ...initial }; }
@@ -11,8 +11,8 @@
     if (typeof href !== "string" || (!(href.startsWith("/") && !href.startsWith("//")) && !/^https?:\/\//i.test(href))) return;
     const a = document.createElement("a"); a.textContent = label; a.href = href; parent.appendChild(a);
   };
-  const post = async (url, body) => {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const post = async (url, body, signal) => {
+    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
     const data = await response.json();
     if (!response.ok) throw new Error({ model_unverified: "回答缺少可靠的资料引用，请重试。", model_failed: "回答生成失败，请稍后重试。" }[data.error] || data.error || "服务暂时不可用");
     return data;
@@ -27,30 +27,50 @@
     render();
   }
 
-  if ($('learning-plan-form')) {
-    $("learning-goal").value = state.goal_id;
-    $("learning-custom-goal").value = state.goal_text;
-    $("learning-background").value = state.background;
-    $("learning-plan-form").addEventListener("submit", async (event) => {
+  const planForm = $("learning-plan-form");
+  if (planForm) {
+    const dialog = $("graph-plan");
+    const input = $("learning-custom-goal");
+    const status = $("learning-plan-status");
+    const submit = planForm.querySelector("button[type=submit]");
+    let pending;
+    input.value = state.goal_text;
+    dialog.addEventListener("close", () => {
+      pending?.abort();
+      submit.disabled = false;
+      status.textContent = "";
+    });
+    planForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const box = $("learning-plan-result"); box.replaceChildren(); note(box, "正在整理学习方向…");
-      state.goal_id = $("learning-goal").value; state.goal_text = $("learning-custom-goal").value.trim(); state.background = $("learning-background").value; save();
+      if (submit.disabled) return;
+      const goal = input.value.trim();
+      if (!goal) {
+        status.textContent = "请输入学习目标。";
+        return;
+      }
+      const request = new AbortController();
+      pending = request;
+      submit.disabled = true;
+      status.textContent = "正在规划学习路径…";
+      state.goal_text = goal;
+      save();
       try {
-        const data = await post("/api/v1/learning/plan", { goal_id: state.goal_id, goal_text: state.goal_text, background: state.background, known_ids: [] });
-        box.replaceChildren();
-        const h = document.createElement("h3"); h.textContent = data.title; box.appendChild(h);
-        if (data.message) note(box, data.message);
-        if (data.starting_note) note(box, data.starting_note);
-        if (data.steps.length) note(box, "建议按以下顺序了解这些主题；遇到具体疑问可进入知识点页面提问。");
-        const list = document.createElement("ol");
-        for (const step of data.steps) {
-          const li = document.createElement("li");
-          link(li, step.title, `/learn/concepts/${encodeURIComponent(step.id)}`);
-          li.append(` — ${step.reason}`);
-          list.appendChild(li);
+        const data = await post("/api/v1/learning/plan", { goal_text: goal }, request.signal);
+        if (request.signal.aborted || !dialog.open) return;
+        if (!data.steps.length) {
+          status.textContent = data.message || "请换一个更具体的学习目标。";
+          return;
         }
-        box.appendChild(list);
-      } catch (error) { box.replaceChildren(); note(box, `生成失败：${error.message}`); }
+        dialog.close();
+        $("learning-plan-result").dispatchEvent(new CustomEvent("textbook-plan", { detail: data }));
+      } catch (error) {
+        if (!request.signal.aborted) status.textContent = "暂时无法生成学习路径，请稍后重试。";
+      } finally {
+        if (pending === request) {
+          pending = undefined;
+          submit.disabled = false;
+        }
+      }
     });
   }
 

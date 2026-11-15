@@ -1,9 +1,9 @@
 {% for card in cards %}
-<article class="public-card">
+<article class="public-card{% if card.images %} has-thumbnail{% endif %}">
   <div class="public-card-date">
-    <span>事件日期</span>
-    <strong>{{ card.event_date }}</strong>
-    {% if card.info_date and card.info_date != card.event_date %}<small>信息日期 {{ card.info_date }}</small>{% endif %}
+    <span>{{ card.date_label }}</span>
+    {% if card.display_date %}<strong>{{ card.display_date }}</strong>{% endif %}
+    {% if card.confirmed_event_date and card.reported_date and card.reported_date != card.confirmed_event_date %}<small>报道日期 {{ card.reported_date }}</small>{% endif %}
   </div>
   <div class="public-card-main">
     <div class="public-card-title">
@@ -29,5 +29,10 @@
     </details>
     {% endif %}
   </div>
+  {% if card.images %}
+  <a class="public-card-thumbnail" href="{{ card.public_detail_url }}" aria-label="{{ card.title }} · 查看详情">
+    <img src="{{ card.images[0].thumb_url }}" alt="{{ card.images[0].caption }}" loading="lazy" decoding="async">
+  </a>
+  {% endif %}
 </article>
 {% endfor %}

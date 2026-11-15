@@ -61,7 +61,8 @@ def expand_digest_candidate(candidate: Candidate, document: SourceDocument) -> l
     items = split_digest_document(document)
     if not items:
         return [candidate]
-    published = candidate.published or published_date_from_digest_title(document.title or candidate.title)
+    explicit = document.published or (candidate.published if candidate.published_is_explicit else "")
+    published = explicit or published_date_from_digest_title(document.title or candidate.title)
     return [
         Candidate(
             url=digest_item_url(candidate.url, item.index),
@@ -72,6 +73,7 @@ def expand_digest_candidate(candidate: Candidate, document: SourceDocument) -> l
             source_kind=candidate.source_kind,
             source_name=candidate.source_name,
             published=published,
+            published_is_explicit=bool(explicit),
             parent_url=candidate.url,
             parent_title=document.title or candidate.title,
             digest_item_index=item.index,

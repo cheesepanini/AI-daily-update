@@ -24,6 +24,7 @@ class Candidate:
     parent_url: str = ""
     parent_title: str = ""
     digest_item_index: int = 0
+    published_is_explicit: bool = True
 
 
 def candidate_from_manual(candidate: ManualCandidate) -> Candidate:

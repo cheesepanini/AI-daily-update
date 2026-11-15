@@ -9,7 +9,7 @@
 <section class="toolbar">
   <div>
     <h1>{{ card.title }}</h1>
-    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ card.status_label }}{% if card.first_party %} · 一手来源{% endif %}</p>
+    <p class="muted">{{ card.date_label }}{% if card.display_date %} <strong>{{ card.display_date }}</strong>{% endif %} · {{ card.track_label }} · {{ card.status_label }}{% if card.first_party %} · 一手来源{% endif %}</p>
   </div>
   <div class="actions">
     <a class="button-link" href="/public">返回列表</a>
@@ -20,14 +20,15 @@
 
 <section class="panel">
   <div class="public-detail-meta">
-    <div><span>事件日期</span><strong>{{ card.event_date or "未记录" }}</strong></div>
-    <div><span>信息日期</span><strong>{{ card.info_date or "未记录" }}</strong></div>
+    <div><span>事件日期</span><strong>{{ card.confirmed_event_date or "待核实" }}</strong></div>
+    <div><span>报道日期</span><strong>{{ card.reported_date or "待核实" }}</strong></div>
     <div><span>入库日期</span><strong>{{ card.collected_date or "未记录" }}</strong></div>
     <div><span>通道</span><strong>{{ card.track_label }}</strong></div>
     <div><span>状态</span><strong>{{ card.status_label }}</strong></div>
     {% if card.source_label %}<div><span>来源</span><strong>{{ card.source_label }}</strong></div>{% endif %}
   </div>
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
+  {% with images=card.images %}{% include '_news_image_group.html' %}{% endwith %}
 </section>
 
 {% if card.research_links %}

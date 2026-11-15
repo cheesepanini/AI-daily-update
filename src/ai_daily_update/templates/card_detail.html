@@ -9,7 +9,7 @@
 <section class="toolbar">
   <div>
     <h1>{{ card.title }}</h1>
-    <p class="muted">事件日期 {{ card.event_date }} · {{ card.track_label }} · {{ ", ".join(card.topics) }}</p>
+    <p class="muted">{{ card.date_label }} {{ card.display_date }} · {{ card.track_label }} · {{ ", ".join(card.topics) }}</p>
   </div>
   <div class="actions">
     {% if navigation.previous %}<a class="button-link" href="{{ navigation.previous.detail_url }}">上一条</a>{% endif %}
@@ -59,19 +59,24 @@
     <div class="review-note">
       <h2>日期修正</h2>
       <div class="date-meta">
-        <div><span>事件日期</span><strong>{{ card.event_date or "未记录" }}</strong></div>
-        <div><span>信息日期</span><strong>{{ card.info_date or "未记录" }}</strong></div>
+        <div><span>旧日期字段</span><strong>{{ card.info_date or "未记录" }}</strong></div>
+        {% if card.legacy_date %}<div><span>旧归期 · 待核实</span><strong>{{ card.legacy_date }}</strong></div>{% endif %}
         <div><span>入库日期</span><strong>{{ card.collected_date or "未记录" }}</strong></div>
       </div>
       <form class="date-edit-form detail" method="post" action="/actions/card-event-date">
         <input type="hidden" name="card_id" value="{{ card.id }}">
+        <input type="hidden" name="review_both" value="true">
         <input type="hidden" name="return_to" value="/cards/{{ card.id }}">
-        <input type="date" name="event_date" value="{{ card.event_date }}">
-        <button type="submit">保存事件日期</button>
+        <label>事件日期 <input type="date" name="event_date" value="{{ card.confirmed_event_date }}">{% if card.date_evidence.event_basis %}<small>{{ card.date_evidence.event_basis }}</small>{% endif %}</label>
+        <label>报道日期 <input type="date" name="reported_date" value="{{ card.reported_date }}">{% if card.date_evidence.reported_basis %}<small>{{ card.date_evidence.reported_basis }}</small>{% endif %}</label>
+        <button type="submit">保存已核日期</button>
       </form>
-      <p class="subtle">事件日期用于简报和 PPT 的“事件/发布日期”筛选；信息日期保留原始来源的发布或抓取口径。</p>
+      <p class="subtle">对照原报道确认后保存；留空会清除该项。两项均为空时，卡片不会归入公开报告。</p>
     </div>
 
+    <hr>
+
+    {% include '_news_images_admin.html' %}
     <hr>
 
     <div class="review-note">

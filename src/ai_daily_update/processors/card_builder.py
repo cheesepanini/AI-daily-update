@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ai_daily_update.processors.candidates import Candidate
+from ai_daily_update.collectors.document import SourceDocument
 from ai_daily_update.utils.dates import now_iso
 from ai_daily_update.utils.slug import slugify
 
@@ -60,6 +61,8 @@ def build_card_metadata(candidate: Candidate, day: date, timezone: str) -> dict:
         "title_en": candidate.title,
         "date": source_date.isoformat(),
         "collected_date": day.isoformat(),
+        "news_dates": {"reported": source_date.isoformat(), "reported_basis": "源站发布字段"}
+        if candidate.published_is_explicit and parse_source_date(candidate.published) else {},
         "source_type": source_type,
         "source_url": candidate.url,
         "primary_source": True,
@@ -89,6 +92,20 @@ def build_card_metadata(candidate: Candidate, day: date, timezone: str) -> dict:
     if candidate.digest_item_index:
         metadata["digest_item_index"] = candidate.digest_item_index
     return metadata
+
+
+def apply_source_evidence(metadata: dict, candidate: Candidate, document: SourceDocument) -> None:
+    dates = metadata["news_dates"]
+    published = parse_source_date(document.published)
+    if published:
+        dates.update(reported=published.isoformat(), reported_basis="原文发布时间")
+    event = parse_date_from_text(document.event_date_text)
+    if event and not candidate.digest_item_index:
+        dates.update(event=event.isoformat(), event_basis=document.event_date_text[:180])
+    if document.images:
+        metadata["image_candidates"] = list(document.images)
+        metadata["image_candidates_page"] = candidate.parent_url or candidate.url
+        metadata["image_candidates_source"] = candidate.url
 
 
 def source_type_for_candidate(candidate: Candidate) -> str:

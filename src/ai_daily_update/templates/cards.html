@@ -77,15 +77,15 @@
         {% for card in cards %}
         <tr data-card-id="{{ card.id }}">
           <td data-label="日期">
-            <div>事件日期：{{ card.event_date }}</div>
-            {% if card.info_date and card.info_date != card.event_date %}
-            <div class="subtle">信息日期：{{ card.info_date }}</div>
+            <div>{{ card.date_label }} {{ card.display_date }}</div>
+            {% if card.confirmed_event_date and card.reported_date and card.reported_date != card.confirmed_event_date %}
+            <div class="subtle">报道日期：{{ card.reported_date }}</div>
             {% endif %}
             <div class="subtle">入库日期：{{ card.collected_date or "未记录" }}</div>
             <form class="date-edit-form" method="post" action="/actions/card-event-date">
               <input type="hidden" name="card_id" value="{{ card.id }}">
               <input type="hidden" name="return_to" value="{{ current_url }}">
-              <input type="date" name="event_date" value="{{ card.event_date }}">
+              <input type="date" name="event_date" value="{{ card.confirmed_event_date }}" aria-label="核对事件日期" required>
               <button type="submit">修正</button>
             </form>
           </td>

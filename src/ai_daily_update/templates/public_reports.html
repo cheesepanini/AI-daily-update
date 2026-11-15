@@ -3,7 +3,7 @@
 <section class="toolbar">
   <div>
     <h1>AI {{ {'day': '日报', 'week': '周报', 'month': '月报'}[period] }}{% if period == 'day' and selected %} · {{ selected }}{% elif selected %}<span class="report-range">{{ selected }} 至 {{ end }}</span>{% endif %}</h1>
-    <p class="muted">{% if period == 'day' %}按事件日期汇集已审核通过的消息；内容随卡片审核和日期修正更新。{% else %}依据已审核通过的卡片撰写，结论附可核对的资料链接。{% endif %}</p>
+    <p class="muted">{% if period == 'day' %}已审核消息按事件日期归期，缺失时使用报道日期。待核旧卡沿用原归期。{% else %}依据已审核通过的卡片撰写，结论附可核对的资料链接。{% endif %}</p>
   </div>
   {% if period != 'day' %}<div class="actions"><a class="button-link" href="/feeds/reports.rss">RSS</a><a class="button-link" href="/feeds/reports.json">JSON Feed</a></div>{% endif %}
 </section>
@@ -43,6 +43,7 @@
       <li>
         <p>{{ item.text }}</p>
         <div class="report-evidence">依据：{% for card in item.sources %}<a href="/public/cards/{{ card.id }}">{{ card.title }}</a>{% if card.source_url %} <a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        {% with images=item.images %}{% include '_news_image_group.html' %}{% endwith %}
       </li>
       {% endfor %}
     </ol>
@@ -50,7 +51,9 @@
     <h2>后续关注</h2>
     <ul class="report-watch">
       {% for item in report.watch %}
-      <li>{{ item.text }} <span class="report-evidence">依据：{% for card in item.sources %}<a href="/public/cards/{{ card.id }}">{{ card.title }}</a>{% if card.source_url %} <a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span></li>
+      <li>{{ item.text }} <span class="report-evidence">依据：{% for card in item.sources %}<a href="/public/cards/{{ card.id }}">{{ card.title }}</a>{% if card.source_url %} <a class="subtle" href="{{ card.source_url }}">原文</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+        {% with images=item.images %}{% include '_news_image_group.html' %}{% endwith %}
+      </li>
       {% endfor %}
     </ul>
     {% endif %}

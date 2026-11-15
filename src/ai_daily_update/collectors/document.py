@@ -9,6 +9,9 @@ class SourceDocument:
     title: str
     description: str
     text: str
+    published: str = ""
+    event_date_text: str = ""
+    images: tuple[dict[str, str], ...] = ()
 
 
 def normalize_text(value: str) -> str:

@@ -7,4 +7,5 @@
   {% if card.event_overview %}<p class="muted">{{ card.event_overview }}</p>{% endif %}
   <p class="subtle">{{ card.source_label }}{% if card.first_party %} · 一手来源{% endif %}{% if card.other_sources %} · 另有 {{ card.other_sources | length }} 条同事件报道{% endif %}</p>
   {% if card.source_url %}<a href="{{ card.source_url }}">查看来源原文</a>{% endif %}
+  {% with images=card.images %}{% include '_news_image_group.html' %}{% endwith %}
 </article>

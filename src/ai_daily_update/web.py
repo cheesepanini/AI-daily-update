@@ -16,15 +16,17 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import shutil
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
 import yaml
+import urllib3
+from PIL import Image
 from dotenv import set_key
 
 from ai_daily_update.api.public import public_card_summary
@@ -45,7 +47,8 @@ from ai_daily_update.feedback.corrections import (
     card_fingerprint, decide_correction, public_revisions, read_corrections,
     report_fingerprint, submit_correction,
 )
-from ai_daily_update.learning import PRESET_GOALS, item_by_id, load_catalog, plan_for_targets, preset_plan, public_item, search_items
+from ai_daily_update.learning import PRESET_GOALS, item_by_id, load_catalog, plan_for_targets, preset_plan, public_item, search_items, textbook_graph
+from ai_daily_update.news_media import approved_images, card_source_page, image_candidates, image_path, prepare_image, refresh_image_candidates
 from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.processors.concepts import match_foundational_concepts
 from ai_daily_update.processors.retrieval import title_terms
@@ -75,12 +78,13 @@ from ai_daily_update.trends import (
     trend_term_groups as build_trend_term_groups,
 )
 from ai_daily_update.utils.config import list_section, section
-from ai_daily_update.utils.dates import now_iso, today_in_timezone
+from ai_daily_update.utils.dates import normalize_iso_date, now_iso, public_date_fields, today_in_timezone
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
 markdown_renderer = MarkdownIt("commonmark", {"html": False}).enable("table")
+public_card_renderer = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
 learning_markdown_renderer = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
 
 STATUS_LABELS = {
@@ -461,7 +465,8 @@ def create_app(root: Path | None = None) -> FastAPI:
         if not learning_ready:
             return HTMLResponse("学习功能尚未通过内容审核。", status_code=404)
         return templates.TemplateResponse(request, "learn.html", {
-            "request": request, "goals": PRESET_GOALS, "is_admin": auth_session_valid(request, settings),
+            "request": request, "is_admin": auth_session_valid(request, settings),
+            "chapters": textbook_graph(learning_catalog),
         })
 
     @app.get("/learn/chat", response_class=HTMLResponse)
@@ -519,12 +524,13 @@ def create_app(root: Path | None = None) -> FastAPI:
         if not matches:
             matches = map_custom_goal_with_llm(settings, learning_catalog, body.goal_text)
         if not matches:
-            return {"title": body.goal_text, "steps": [], "message": "暂时无法可靠匹配这个目标，请描述想完成的具体任务。"}
+            return {"title": body.goal_text, "steps": [], "target_ids": [], "message": "暂时无法可靠匹配这个目标，请描述想完成的具体任务。"}
+        targets = [item["id"] for item in matches]
         try:
-            steps = plan_for_targets(learning_catalog, [item["id"] for item in matches], body.known_ids)
+            steps = plan_for_targets(learning_catalog, targets, body.known_ids)
         except ValueError:
             return JSONResponse({"error": "invalid_learning_graph"}, status_code=503)
-        return {"title": body.goal_text, "steps": steps, "message": "", "starting_note": starting_notes[body.background]}
+        return {"title": body.goal_text, "steps": steps, "target_ids": targets, "message": "", "starting_note": starting_notes[body.background]}
 
     @app.post("/api/v1/learning/chat")
     def learning_chat(body: LearningChatRequest, request: Request):
@@ -1018,7 +1024,7 @@ def create_app(root: Path | None = None) -> FastAPI:
             {
                 "request": request,
                 "card": item,
-                "content_html": markdown_renderer.render(card.content),
+                "content_html": public_card_renderer.render(card.content),
                 "is_admin": auth_session_valid(request, settings),
                 "foundational_concepts": match_foundational_concepts(
                     card.metadata, card.content, settings.concepts
@@ -1031,6 +1037,30 @@ def create_app(root: Path | None = None) -> FastAPI:
                 "topic_labels": {option["id"]: option["label"] for option in topic_options(settings.topics)},
             },
         )
+
+    @app.get("/public/card-images/{card_id}/{image_id}/{size}")
+    def public_card_image(card_id: str, image_id: str, size: str):
+        path = find_card_path_by_id(settings, card_id)
+        if path and size in {"full", "thumb"}:
+            metadata = read_card(path).metadata
+            if metadata.get("review_status") in {"accepted", "needs-review", "later"} and any(
+                image["id"] == image_id for image in approved_images(metadata, card_id)
+            ):
+                asset = image_path(settings.root, image_id, size)
+                if asset.is_file():
+                    return FileResponse(asset, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+
+    @app.get("/card-image-preview/{card_id}/{image_id}")
+    def card_image_preview(card_id: str, image_id: str):
+        path = find_card_path_by_id(settings, card_id)
+        if path and re.fullmatch(r"[a-f0-9]{64}", image_id):
+            metadata = read_card(path).metadata
+            if any(candidate.get("preview") == image_id for candidate in image_candidates(metadata)):
+                asset = image_path(settings.root, image_id, "full")
+                if asset.is_file():
+                    return FileResponse(asset, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+        return Response(status_code=404)
 
     @app.get("/api/v1/meta", response_model=PublicMetaResponse)
     def api_public_meta() -> PublicMetaResponse:
@@ -1251,6 +1281,8 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "date": display_event_date(metadata),
                     "event_date": display_event_date(metadata),
                     "info_date": str(metadata.get("date", "")),
+                    **public_date_fields(metadata),
+                    "date_evidence": metadata.get("news_dates", {}),
                     "collected_date": str(metadata.get("collected_date", metadata.get("date", ""))),
                     "track": track,
                     "track_label": TRACK_LABELS.get(track, track),
@@ -1262,6 +1294,9 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "first_party": metadata.get("first_party") is True,
                     "event_group_id": str(metadata.get("event_group_id") or ""),
                     "research_links": metadata.get("research_links") if isinstance(metadata.get("research_links"), dict) else {},
+                    "image_candidates": image_candidates(metadata),
+                    "approved_images": approved_images(metadata, str(metadata.get("id", path.stem))),
+                    "digest_item_index": metadata.get("digest_item_index"),
                     "path": path,
                 },
                 "content_html": markdown_renderer.render(card.content),
@@ -1371,16 +1406,28 @@ def create_app(root: Path | None = None) -> FastAPI:
     def action_card_event_date(
         card_id: str = Form(...),
         event_date: str = Form(default=""),
+        reported_date: str = Form(default=""),
+        review_both: bool = Form(default=False),
         return_to: str = Form(default="/cards"),
     ) -> RedirectResponse:
         normalized = normalize_iso_date(event_date)
-        if normalized is None:
+        reported = normalize_iso_date(reported_date)
+        if normalized is None or reported is None or (not review_both and not normalized):
             return RedirectResponse(safe_return_to(return_to, "/"), status_code=303)
         path = find_card_path_by_id(settings, card_id)
         if path:
-            card = read_card(path)
-            previous_event_date = str(card.metadata.get("event_date", ""))
-            update_metadata(path, {"event_date": normalized})
+            with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
+                card = read_card(path)
+                previous_event_date = str(card.metadata.get("event_date", ""))
+                dates = card.metadata.get("news_dates", {})
+                if not review_both:
+                    reported = dates.get("reported", "")
+                card.metadata.update(event_date=normalized, news_dates={
+                    "event": normalized, "event_basis": "人工核对" if normalized else "",
+                    "reported": reported,
+                    "reported_basis": ("人工核对" if review_both else dates.get("reported_basis", "")) if reported else "",
+                })
+                write_card(path, card.metadata, card.content)
             append_feedback_event(
                 settings.root,
                 settings.timezone,
@@ -1394,11 +1441,60 @@ def create_app(root: Path | None = None) -> FastAPI:
                     "title": card.metadata.get("title_zh") or card.metadata.get("title_en"),
                     "source_url": card.metadata.get("source_url"),
                     "info_date": card.metadata.get("date"),
+                    "reported_date": reported,
                     "collected_date": card.metadata.get("collected_date"),
                 },
             )
             rebuild_index(settings.markdown_root, settings.sqlite_path)
         return RedirectResponse(safe_return_to(return_to, "/"), status_code=303)
+
+    @app.post("/actions/card-images")
+    def action_card_images(card_id: str = Form(...), action: str = Form(...),
+                           url: str = Form(default=""), image_id: str = Form(default=""),
+                           credit: str = Form(default=""), confirmed: bool = Form(default=False),
+                           main: bool = Form(default=False)):
+        path = find_card_path_by_id(settings, card_id)
+        if not path:
+            return Response(status_code=404)
+        return_to = "/cards/" + quote(card_id, safe="")
+        try:
+            if action == "discover":
+                count = refresh_image_candidates(path)
+                return RedirectResponse(return_to + f"?image_count={count}#news-images", 303)
+            snapshot = read_card(path).metadata
+            if action == "preview":
+                if not any(item["url"] == url for item in image_candidates(snapshot)):
+                    raise ValueError("候选图已变化，请刷新卡片")
+                image_id = prepare_image(settings.root, url)
+            with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
+                card = read_card(path)
+                metadata = card.metadata
+                if card_source_page(metadata) != card_source_page(snapshot) or metadata.get("source_url") != snapshot.get("source_url"):
+                    raise ValueError("原报道链接已变化，请刷新卡片")
+                candidate = next((item for item in image_candidates(metadata) if item["url"] == url), None)
+                images = [item for item in metadata.get("approved_images", []) if item.get("id") != image_id
+                          and item.get("page") == card_source_page(metadata) and item.get("card_source") == metadata.get("source_url")]
+                if action == "preview" and candidate:
+                    candidate["preview"] = image_id
+                elif action == "publish" and candidate and candidate.get("preview") == image_id:
+                    credit = credit.strip()
+                    if not confirmed or not credit or len(credit) > 120:
+                        raise ValueError("请填写图片署名，并确认可转载且对应这条消息")
+                    if len(images) >= 4 or not all(image_path(settings.root, image_id, size).is_file() for size in ("full", "thumb")):
+                        raise ValueError("请先生成预览；每条消息最多发布四张图片")
+                    record = {"id": image_id, "url": url, "page": card_source_page(metadata),
+                              "card_source": metadata.get("source_url"), "caption": candidate["caption"],
+                              "credit": credit, "approved_at": now_iso(settings.timezone)}
+                    images.insert(0 if main else len(images), record)
+                    metadata["approved_images"] = images
+                elif action == "withdraw":
+                    metadata["approved_images"] = images
+                else:
+                    raise ValueError("图片操作无效，请刷新后重试")
+                write_card(path, metadata, card.content)
+        except (OSError, ValueError, urllib3.exceptions.HTTPError, Image.DecompressionBombError):
+            return RedirectResponse(return_to + "?image_error=1#news-images", 303)
+        return RedirectResponse(return_to + "?image_saved=1#news-images", 303)
 
     @app.post("/actions/card-publication")
     def action_card_publication(
@@ -2008,8 +2104,8 @@ def public_page_url(
 
 
 def sync_public_search(settings: Settings, connection: Any) -> None:
-    known = {row["path"]: (row["mtime_ns"], row["size"]) for row in connection.execute(
-        "SELECT path, mtime_ns, size FROM public_search"
+    known = {row["path"]: (row["mtime_ns"], row["size"], row["display_version"]) for row in connection.execute(
+        "SELECT path, mtime_ns, size, json_extract(item_json, '$.display_version') AS display_version FROM public_search"
     )}
     seen = set()
     with connection:
@@ -2017,7 +2113,7 @@ def sync_public_search(settings: Settings, connection: Any) -> None:
             key = str(path)
             seen.add(key)
             stat = path.stat()
-            if known.get(key) == (stat.st_mtime_ns, stat.st_size):
+            if known.get(key) == (stat.st_mtime_ns, stat.st_size, 2):
                 continue
             card = read_card(path)
             item = card_list_item(path, card.metadata, card.content)
@@ -2062,7 +2158,7 @@ def search_public_cards(settings: Settings, *, status: str = "", track: str = ""
         clauses.append("event_date >= ?")
         values.append(start)
     if end:
-        clauses.append("event_date <= ?")
+        clauses.append("event_date != '' AND event_date <= ?")
         values.append(end)
     for term in q.strip().casefold().split():
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -2222,6 +2318,20 @@ def public_report_response(request: Request, settings: Settings, period: str = "
                                     datetime.now(ZoneInfo(settings.timezone)).date(), calendar)
     if picker is None:
         return HTMLResponse("日历月份无效。", status_code=404)
+    if context["report"]:
+        seen_images = set()
+        for entry in [*context["report"]["highlights"], *context["report"]["watch"]]:
+            images = []
+            # Prefer each cited card's lead image before showing a second image from it.
+            for index in range(4):
+                for card in entry["sources"]:
+                    if index >= len(card["images"]):
+                        continue
+                    image = card["images"][index]
+                    if image["id"] not in seen_images and len(images) < 3 and len(seen_images) < 8:
+                        seen_images.add(image["id"])
+                        images.append({**image, "card_title": card["title"], "card_url": card["public_detail_url"]})
+            entry["images"] = images
     return templates.TemplateResponse(request, "public_reports.html", {
         "request": request, **context, "picker": picker, "is_admin": auth_session_valid(request, settings),
         "revisions": public_revisions(settings.root, "report", f"{period}:{context['selected']}") if context["report"] else [],
@@ -2429,7 +2539,7 @@ def filter_public_cards(
     if start:
         filtered = [card for card in filtered if str(card.get("event_date", "")) >= start]
     if end:
-        filtered = [card for card in filtered if str(card.get("event_date", "")) <= end]
+        filtered = [card for card in filtered if card.get("event_date") and str(card["event_date"]) <= end]
     return filtered
 
 
@@ -2449,19 +2559,10 @@ def display_event_date(metadata: dict[str, Any]) -> str:
     return str(metadata.get("event_date") or metadata.get("date") or "")
 
 
-def normalize_iso_date(value: str) -> str | None:
-    text = value.strip()
-    if not text:
-        return ""
-    try:
-        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
-    except ValueError:
-        return None
-
-
 def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[str, Any]:
-    info_date = str(metadata.get("date", ""))
-    event_date = display_event_date(metadata)
+    dates = public_date_fields(metadata)
+    info_date = str(metadata.get("date", "")) if dates["legacy_date"] else dates["reported_date"]
+    event_date = dates["display_date"]
     conclusion = extract_one_sentence_conclusion(content)
     event_overview = extract_event_overview(content) or metadata.get("title_en", "")
     source_url = safe_source_url(metadata.get("source_url", ""))
@@ -2477,6 +2578,9 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
     search_fields = {key: value.casefold() for key, value in search_fields.items()}
     search_fields["all"] = " ".join([*search_fields.values(), " ".join(metadata.get("topics", []) or [])]).casefold()
     return {
+        "display_version": 2,
+        **dates,
+        "images": approved_images(metadata, str(metadata.get("id", path.stem))),
         "path": path,
         "id": metadata.get("id", path.stem),
         "title": metadata.get("title_zh") or metadata.get("title_en") or path.stem,
@@ -2553,7 +2657,15 @@ def adjacent_card_navigation(settings: Settings, card_id: str) -> dict[str, Any]
 
 
 def find_card_path_by_id(settings: Settings, card_id: str) -> Path | None:
-    for path in iter_cards(settings.markdown_root):
+    if not card_id or "/" in card_id or "\\" in card_id or "\x00" in card_id:
+        return None
+    # Generated cards are normally stored under the year and month in the ID.
+    if len(card_id.encode()) < 240 and re.match(r"^\d{4}-\d{2}-\d{2}-", card_id):
+        direct = settings.markdown_root / "cards" / card_id[:4] / card_id[5:7] / f"{card_id}.md"
+        if direct.is_file() and read_card(direct).metadata.get("id") == card_id:
+            return direct
+    paths = iter_cards(settings.markdown_root)
+    for path in sorted(paths, key=lambda path: path.stem != card_id):
         card = read_card(path)
         if card.metadata.get("id") == card_id:
             return path

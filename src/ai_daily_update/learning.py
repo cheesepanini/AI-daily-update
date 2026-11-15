@@ -49,6 +49,29 @@ def item_by_id(catalog: dict[str, Any], item_id: str) -> dict[str, Any] | None:
     return next((item for item in catalog["items"] if item["id"] == item_id), None)
 
 
+def textbook_graph(catalog: dict[str, Any]) -> list[dict]:
+    items = catalog["items"]
+    ids = {item["id"] for item in items}
+    chapters = {}
+    for item in items:
+        source_section = str(item.get("source_section") or "")
+        sections = re.findall(r"\d+(?:\.\d+)*", re.sub(r"内部第\s*\d+\s*点", "", source_section))
+        chapter = sections[0].split(".")[0] if sections else ""
+        group = chapters.setdefault(chapter, {"number": chapter, "title": f"第{chapter}章" if chapter else "其他知识点", "id": "", "nodes": []})
+        if item["type"] == "synthesis":
+            group.update(id=item["id"], title=item["title"].replace("学习地图：", " · "), sections=sections)
+            continue
+        relations = item.get("prerequisites", {})
+        group["nodes"].append({
+            "id": item["id"], "title": item["title"], "type": item["type"], "sections": sections,
+            "source_section": source_section,
+            "aliases": item.get("aliases", []),
+            "required": [target for target in relations.get("required", []) if target in ids],
+            "helpful": [target for target in relations.get("helpful", []) if target in ids],
+        })
+    return sorted(chapters.values(), key=lambda chapter: int(chapter["number"] or 0))
+
+
 def search_items(catalog: dict[str, Any], query: str, limit: int = 8, kind: str = "") -> list[dict[str, Any]]:
     query = query.strip().lower()
     if not query:
@@ -143,8 +166,8 @@ def preset_plan(catalog: dict[str, Any], goal_id: str, known_ids: list[str] | No
     concepts = {item["title"]: item["id"] for item in catalog["items"] if item["type"] == "concept"}
     targets = [concepts[name] for name in names if name in concepts]
     if not targets:
-        return {"title": title, "steps": [], "message": "该目标的教材内容尚未审核发布。"}
-    return {"title": title, "steps": plan_for_targets(catalog, targets, known_ids), "message": ""}
+        return {"title": title, "steps": [], "target_ids": [], "message": "该目标的教材内容尚未审核发布。"}
+    return {"title": title, "steps": plan_for_targets(catalog, targets, known_ids), "target_ids": targets, "message": ""}
 
 
 def public_item(item: dict[str, Any]) -> dict[str, Any]:

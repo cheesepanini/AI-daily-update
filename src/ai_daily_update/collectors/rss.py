@@ -71,11 +71,7 @@ def parse_rss_feed(xml_source: str | bytes, feed: RSSFeedConfig) -> list[RSSItem
             f"{title}\n{summary}", feed.include_keywords
         ):
             continue
-        published = (
-            entry.get("published", "")
-            or entry.get("updated", "")
-            or entry.get("created", "")
-        )
+        published = entry.get("published", "")
         items.append(
             RSSItem(
                 feed_name=feed.name,

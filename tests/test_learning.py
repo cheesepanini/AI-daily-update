@@ -6,7 +6,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from ai_daily_update.learning import choose_news_concepts_with_llm, plan_for_targets, search_items
+from ai_daily_update.learning import choose_news_concepts_with_llm, plan_for_targets, search_items, textbook_graph
 from ai_daily_update.storage.markdown import write_card
 from ai_daily_update.web import create_app, learning_card_recommendations, map_custom_goal_with_llm, safe_source_url
 
@@ -46,6 +46,14 @@ def test_search_finds_a_concept_from_its_check_question():
     assert [result["title"] for result in search_items(catalog, "参数更新幅度太大怎么办？")] == ["梯度下降"]
 
 
+def test_graph_distinguishes_section_references_from_internal_point_numbers():
+    concept = {**item("PPO"), "source_section": "3.4.2 / 7.2.3"}
+    detail = {**item("探索"), "type": "microtopic", "source_section": "3.4.2 / 内部第1点"}
+    [chapter] = textbook_graph({"items": [concept, detail]})
+    assert chapter["number"] == "3"
+    assert [node["sections"] for node in chapter["nodes"]] == [["3.4.2", "7.2.3"], ["3.4.2"]]
+
+
 def setup_site(tmp_path, enabled=True):
     config = tmp_path / "config"
     config.mkdir()
@@ -64,6 +72,7 @@ def test_public_learning_routes_and_goal(tmp_path):
     chat_page = client.get("/learn/chat")
     assert path_page.status_code == chat_page.status_code == 200
     assert "learning-plan-form" in path_page.text and "learning-chat-form" not in path_page.text
+    assert "教材知识图谱" in path_page.text and path_page.text.count("data-graph-id=") == 2
     assert "learning-chat-form" in chat_page.text and "learning-plan-form" not in chat_page.text
     assert 'href="/learn/chat"' in path_page.text
     assert 'href="/learn"' in chat_page.text
@@ -71,6 +80,7 @@ def test_public_learning_routes_and_goal(tmp_path):
     assert client.get("/learn/concepts/concept:张量").status_code == 200
     plan = client.post("/api/v1/learning/plan", json={"goal_text": "梯度下降", "background": "beginner"}).json()
     assert [step["id"] for step in plan["steps"]] == ["concept:张量", "concept:梯度下降"]
+    assert plan["target_ids"] == ["concept:梯度下降"]
     assert client.post("/api/v1/learning/plan", json={"goal_text": "无法匹配的领域"}).json()["steps"] == []
 
 
