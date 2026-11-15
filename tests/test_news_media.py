@@ -1,12 +1,15 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from io import BytesIO
+from threading import Barrier
+from time import sleep
 
 import pytest
 from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from ai_daily_update import news_media
+from ai_daily_update import news_media, web
 from ai_daily_update.collectors.web_page import extract_document_from_html
 from ai_daily_update.config import load_settings
 from ai_daily_update.processors.candidates import Candidate
@@ -33,6 +36,45 @@ def test_original_source_dates_and_images_are_distinguished_from_inference():
     dates = public_date_fields(metadata)
     assert dates["display_date"] == "2026-07-07" and dates["reported_date"] == "2026-07-08"
     assert [item["url"] for item in document.images] == ["https://example.org/cover.png", "https://example.org/photo.jpg"]
+
+
+def test_qbitai_keeps_article_images_and_uses_the_bylines_publication_date():
+    document = extract_document_from_html("https://www.qbitai.com/2026/11/510013.html", """
+        <main><div class="article">
+          <div class="article_info"><span class="date">2026-11-14</span></div>
+          <p>这段正文介绍了发布活动。</p><img data-src="/article-photo.png">
+        </div></main>
+    """)
+    assert document.published == "2026-11-14"
+    assert "这段正文介绍了发布活动" in document.text
+    assert [image["url"] for image in document.images] == ["https://www.qbitai.com/article-photo.png"]
+
+
+def test_concurrent_searches_serialize_bulk_date_index_refresh(tmp_path, monkeypatch):
+    settings = load_settings(tmp_path)
+    for number in range(4):
+        write_card(settings.markdown_root / "cards" / f"{number}.md", {
+            "id": str(number), "title_zh": f"消息{number}", "review_status": "accepted",
+            "track": "industry", "news_dates": {"event": "2026-07-07", "reported": "2026-07-08"},
+        }, "## 一句话结论\n正文。")
+    connect = web.db.connect
+    connect(settings.sqlite_path).close()
+    barrier = Barrier(3)
+
+    def connect_together(path):
+        connection = connect(path)
+        connection.execute("PRAGMA busy_timeout = 20")
+        barrier.wait(timeout=3)
+        return connection
+
+    def slow_read(path):
+        sleep(0.04)
+        return read_card(path)
+
+    monkeypatch.setattr(web.db, "connect", connect_together)
+    monkeypatch.setattr(web, "read_card", slow_read)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        assert list(pool.map(lambda _: len(web.search_public_cards(settings, status="accepted")), range(3))) == [4, 4, 4]
 
 
 def test_download_checks_redirect_destination_and_pins_public_ip(monkeypatch):

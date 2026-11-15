@@ -2166,7 +2166,10 @@ def search_public_cards(settings: Settings, *, status: str = "", track: str = ""
         values.append(f"%{escaped}%")
     connection = db.connect(settings.sqlite_path)
     try:
-        sync_public_search(settings, connection)
+        # A bulk card update can make concurrent requests rebuild the same
+        # rows. Serialize the refresh across workers before reading the index.
+        with exclusive_file_lock(settings.sqlite_path.with_suffix(".public-search.lock"), blocking=True):
+            sync_public_search(settings, connection)
         rows = connection.execute("SELECT path, item_json FROM public_search WHERE " + " AND ".join(clauses), values)
         items = []
         for row in rows:

@@ -41,8 +41,8 @@ def extract_document_from_html(url: str, html: str | bytes) -> SourceDocument:
         element.decompose()
     title = extract_title(soup) or url
     description = extract_description(soup)
-    article = soup.select_one("#mp-editor, .article-content, .entry-content, .c-article-body, .article .article_info")
-    article = article or soup.select_one("article, main, .article")
+    article = soup.select_one("#mp-editor, .article-content, .entry-content, .c-article-body")
+    article = article or soup.select_one("article, .article") or soup.select_one("main")
     main = article or soup.body or soup
     text = normalize_text(main.get_text("\n"))
     event = re.search(r"^(?:事件日期|事件时间|发生日期|发生时间)[：:]\s*(?:\d{4}-\d{1,2}-\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:\s|$)", text, re.MULTILINE)
