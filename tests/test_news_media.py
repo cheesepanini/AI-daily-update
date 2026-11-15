@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 from datetime import date
 from io import BytesIO
 from threading import Barrier
@@ -11,6 +12,7 @@ from PIL import Image
 
 from ai_daily_update import news_media, web
 from ai_daily_update.collectors.web_page import extract_document_from_html
+from ai_daily_update.collectors.document import SourceDocument
 from ai_daily_update.config import load_settings
 from ai_daily_update.processors.candidates import Candidate
 from ai_daily_update.processors.card_builder import apply_content_date, apply_source_evidence, build_card_metadata
@@ -125,7 +127,58 @@ def test_legacy_source_backfill_preserves_periods_and_manual_dates(tmp_path):
 
     update_metadata(path, {"news_dates": {"event": "2026-07-06", "event_basis": "人工核对"}})
     news_media.save_news_evidence(path, url, url, document, backfill=True)
-    assert read_card(path).metadata["news_dates"] == {"event": "2026-07-06", "event_basis": "人工核对"}
+    assert read_card(path).metadata["news_dates"] == {
+        "event": "2026-07-06", "event_basis": "人工核对",
+        "reported": "2026-07-07", "reported_basis": "原文发布时间",
+    }
+
+
+def test_model_date_requires_original_quote_and_merges_with_report_date(tmp_path):
+    page = "https://example.org/news"
+    quote = "On October 29, the attacker published a malicious extension."
+    document = SourceDocument(url=page, title="Incident update", description="", text=quote, published="2026-11-13")
+
+    class Model:
+        available = True
+
+        def generate_learning_reply(self, instructions, prompt):
+            return json.dumps([{"index": 0, "date": "2026-10-29", "quote": quote},
+                               {"index": 1, "date": "2026-10-30", "quote": quote},
+                               {"index": 2, "date": "2026-10-29", "quote": "On October 29, invented evidence."}])
+
+    results = news_media.infer_source_events(Model(), [(document.title, document, 0)] * 3)
+    assert results[0].event_date_text.endswith(quote)
+    assert not results[1].event_date_text and not results[2].event_date_text
+    path = tmp_path / "history.md"
+    write_card(path, {"source_url": page, "review_status": "accepted",
+                      "news_dates": {"reported": "2026-11-13", "reported_basis": "人工核对"}}, "正文")
+    assert news_media.save_news_evidence(path, page, page, results[0], backfill=True,
+                                         apply_period_changes=True)[1] == "2026-10-29"
+    dates = read_card(path).metadata["news_dates"]
+    assert dates["event"] == "2026-10-29" and dates["reported_basis"] == "人工核对"
+
+
+def test_arxiv_figures_crosscheck_exact_paper_and_generate_private_preview(tmp_path, monkeypatch):
+    paper = "2611.12345v1"
+    abs_page = f"https://arxiv.org/abs/{paper}"
+    html_page = f"https://arxiv.org/html/{paper}"
+    abs_html = b'<meta name="citation_online_date" content="2026/11/12"><div class="license"><a href="https://creativecommons.org/licenses/by/4.0/">view license</a></div>'
+    html = b'''<span class="ltx_personname">Example Author</span>
+    <figure><img src="figure1.png"><figcaption>Figure 1: Architecture</figcaption></figure>
+    <figure><img src="figure2.png"><figcaption>Figure 2: Reproduced with permission</figcaption></figure>
+    <figure><img src="/html/2611.12345v2/other.png"><figcaption>Figure 3: Model</figcaption></figure>'''
+    documents = {abs_page: abs_html, html_page: html}
+    monkeypatch.setattr(news_media, "download_public", lambda url, *_: (url, documents[url]))
+    preview = "a" * 64
+    monkeypatch.setattr(news_media, "prepare_image", lambda root, url: preview)
+    document = news_media.preview_licensed_figures(tmp_path, news_media.fetch_news_evidence(abs_page))
+    assert document.published == "2026-11-12"
+    assert [item["url"] for item in document.images] == [f"{html_page}/figure1.png"]
+    assert document.images[0]["preview"] == preview
+    candidate = Candidate(abs_page, "academic", [], "Test paper")
+    metadata = build_card_metadata(candidate, date(2026, 11, 12), "Asia/Shanghai")
+    apply_source_evidence(metadata, candidate, document)
+    assert not news_media.approved_images(metadata, "sample")
 
 
 def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch):

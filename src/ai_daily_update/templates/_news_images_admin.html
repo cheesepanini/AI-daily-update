@@ -22,10 +22,11 @@
     <input type="hidden" name="card_id" value="{{ card.id }}">
     <input type="hidden" name="url" value="{{ image.url }}">
     <p class="subtle">{{ image.caption }}</p>
+    {% if image.license %}<p class="subtle"><a href="{{ image.evidence_page }}">原文图注及授权</a> · {{ image.license }}</p>{% endif %}
     {% if image.preview %}
     <img src="/card-image-preview/{{ card.id | urlencode }}/{{ image.preview }}" alt="{{ image.caption }}" loading="lazy">
     <input type="hidden" name="image_id" value="{{ image.preview }}">
-    <label>图片署名 <input name="credit" maxlength="120" required placeholder="机构、作者或素材署名"></label>
+    <label>图片署名 <input name="credit" maxlength="120" required value="{{ image.credit or '' }}" placeholder="机构、作者或素材署名"></label>
     <label><input type="checkbox" name="confirmed" value="true" required> 我已确认可转载，且图片对应这条消息</label>
     <label><input type="checkbox" name="main" value="true"> 设为列表主图</label>
     <button name="action" value="publish">发布图片</button>

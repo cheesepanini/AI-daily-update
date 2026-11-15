@@ -8,7 +8,7 @@ from typing import Annotated, Callable
 
 import typer
 
-from ai_daily_update.collectors.arxiv import search_latest_arxiv
+from ai_daily_update.collectors.arxiv import extract_arxiv_id, fetch_arxiv_metadata, search_latest_arxiv
 from ai_daily_update.collectors.company_blogs import (
     company_blogs_from_settings,
     fetch_all_company_blogs,
@@ -20,6 +20,7 @@ from ai_daily_update.config import Settings, load_settings
 from ai_daily_update.feedback.events import append_feedback_event
 from ai_daily_update.learning import choose_news_concepts_with_llm, load_catalog
 from ai_daily_update.llm.client import OpenAIClient
+from ai_daily_update.news_media import SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
     apply_content_date,
@@ -474,7 +475,7 @@ def _run_daily_pipeline_locked(
                 metadata["duplicate_suspect"] = duplicate_suspect
             source_document = None
             try:
-                source_document = fetch_source_document(candidate.parent_url or candidate.url)
+                source_document = fetch_news_evidence(candidate.parent_url or candidate.url)
                 if source_document.title and candidate.title == candidate.url:
                     metadata["title_en"] = source_document.title
             except Exception as exc:
@@ -493,7 +494,10 @@ def _run_daily_pipeline_locked(
             content = content or build_placeholder_content(candidate)
             metadata = apply_content_date(metadata, candidate, content)
             if source_document:
+                source_document = infer_source_events(llm, [(candidate.title, source_document, candidate.digest_item_index)])[0]
+                source_document = preview_licensed_figures(settings.root, source_document)
                 apply_source_evidence(metadata, candidate, source_document)
+                metadata["source_evidence_scan"] = SOURCE_SCAN_VERSION
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
             if content_from_llm and llm.available:
                 metadata.update(score_card_quality_with_llm(metadata, content, llm))
@@ -843,70 +847,115 @@ def index_command() -> None:
 
 
 @app.command("news-media-audit")
-def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Backfill source evidence for recent featured cards.")) -> None:
-    """List unchecked dates and recent cards awaiting image review."""
+def news_media_audit(apply: bool = typer.Option(False, "--apply", help="Backfill source evidence for all public cards.")) -> None:
+    """Inventory source evidence or scan all existing public news cards."""
+    from collections import Counter, deque
     from concurrent.futures import ThreadPoolExecutor
+    import time
 
     import urllib3
     from ai_daily_update.news_media import (
-        approved_images, card_source_page, fetch_news_evidence, image_candidates, save_news_evidence,
+        approved_images, card_source_page, image_candidates, save_news_evidence,
     )
 
     settings = _settings()
-    today = today_in_timezone(settings.timezone)
-    cutoff = (today - timedelta(days=29)).isoformat()
-    unchecked = recent = failures = moved = 0
-    pending: dict[str, list[tuple[Path, str, str | None]]] = {}
+    counts = Counter()
+    pages = {}
     for path in reversed(iter_cards(settings.markdown_root)):
         metadata = read_card(path).metadata
-        if metadata.get("review_status") != "accepted":
+        if metadata.get("review_status") not in {"accepted", "needs-review", "later"}:
             continue
+        counts["cards"] += 1
         card_id = str(metadata.get("id", path.stem))
         dates = public_date_fields(metadata)
-        current = dates["display_date"]
-        if not (dates["confirmed_event_date"] and dates["reported_date"]):
-            unchecked += 1
-            typer.echo(f"日期待核\t{current or '待归期'}\t{card_id}")
+        counts["missing_event"] += not dates["confirmed_event_date"]
+        counts["missing_reported"] += not dates["reported_date"]
+        counts["published_images"] += len(approved_images(metadata, card_id))
+        counts["candidates"] += len(image_candidates(metadata))
         page = card_source_page(metadata)
-        if not cutoff <= (current or str(metadata.get("collected_date") or "")) <= today.isoformat() or not page:
+        if not apply or metadata.get("source_evidence_scan") == SOURCE_SCAN_VERSION or not page:
             continue
-        recent += 1
-        already_checked = (metadata.get("image_candidates_page") == page
-                           and metadata.get("image_candidates_source") == metadata.get("source_url"))
-        if apply and not already_checked:
-            pending.setdefault(page, []).append((path, card_id, metadata.get("source_url")))
-        else:
-            typer.echo(f"配图清单\t{current}\t候选 {len(image_candidates(metadata))}"
-                       f"\t已发布 {len(approved_images(metadata, card_id))}\t{card_id}")
+        title = str(metadata.get("title_en") or metadata.get("title_zh") or card_id)
+        pages.setdefault(page, []).append((path, card_id, metadata.get("source_url"), title,
+                                           int(metadata.get("digest_item_index") or 0), dates))
+    typer.echo(f"回填前 {dict(counts)}；待抓网页 {len(pages)}")
+    if not pages:
+        return
 
-    def fetch_group(group):
-        page, entries = group
+    def fetch_page(page):
         try:
-            document = fetch_news_evidence(page)
-        except (OSError, ValueError, urllib3.exceptions.HTTPError):
-            return [(card_id, None, "") for _, card_id, _ in entries]
-        results = []
-        for path, card_id, source in entries:
-            try:
-                count, corrected = save_news_evidence(path, page, source, document, backfill=True)
-                results.append((card_id, count, corrected))
-            except (OSError, ValueError):
-                results.append((card_id, None, ""))
-        return results
+            return preview_licensed_figures(settings.root, fetch_news_evidence(page))
+        except (OSError, ValueError, urllib3.exceptions.HTTPError) as exc:
+            typer.echo(f"网页抓取失败\t{page}\t{type(exc).__name__}")
+            return None
 
-    if pending:
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            for group in pool.map(fetch_group, pending.items()):
-                for card_id, count, corrected in group:
-                    if count is None:
-                        failures += 1
-                        typer.echo(f"原文获取或保存失败\t{card_id}", err=True)
-                    else:
-                        typer.echo(f"配图清单\t候选 {count}\t{card_id}")
-                    if corrected:
-                        moved += 1
-                        typer.echo(f"归期变更待确认\t{corrected}\t{card_id}")
-    typer.echo(f"处理前日期待核 {unchecked}；发现归期变更候选 {moved}；最近30天精选 {recent}；失败 {failures}")
+    llm = _llm_client(settings)
+
+    def complete(batch):
+        model_entries = [(entry[3], doc, entry[4]) for entry, doc, _ in batch
+                         if not entry[5]["confirmed_event_date"]]
+        enriched = iter(infer_source_events(llm, model_entries))
+        for (entry, doc, page) in batch:
+            path, card_id, source, _, _, old_dates = entry
+            if not old_dates["confirmed_event_date"]:
+                doc = next(enriched)
+            try:
+                num, changed = save_news_evidence(path, page, source, doc, backfill=True, apply_period_changes=True)
+            except (OSError, ValueError):
+                typer.echo(f"回填保存失败\t{card_id}")
+                continue
+            if changed:
+                typer.echo(f"归期变化\t{old_dates['display_date']}\t{changed}\t{card_id}")
+            typer.echo(f"已扫描\t候选 {num}\t{card_id}")
+
+    paper_pages = {page: extract_arxiv_id(page) for page in pages if extract_arxiv_id(page)}
+    web_pages = [page for page in pages if page not in paper_pages]
+
+    def scan_papers():
+        scanned = failures = 0
+        papers = list(paper_pages.items())
+        for start in range(0, len(papers), 80):
+            group = papers[start:start + 80]
+            if start:
+                time.sleep(3)
+            try:
+                documents = fetch_arxiv_metadata([arxiv_id for _, arxiv_id in group])
+            except (OSError, ValueError):
+                documents = {}
+            batch = []
+            for page, arxiv_id in group:
+                if arxiv_id not in documents:
+                    failures += 1
+                    typer.echo(f"论文元数据未返回\t{page}")
+                    continue
+                scanned += 1
+                batch.extend((entry, documents[arxiv_id], page) for entry in pages[page])
+            complete(batch)
+        return scanned, failures
+
+    with ThreadPoolExecutor(max_workers=12) as fetchers, ThreadPoolExecutor(max_workers=4) as models:
+        papers = fetchers.submit(scan_papers)
+        tasks = deque()
+        batch = []
+        for page, document in zip(web_pages, fetchers.map(fetch_page, web_pages)):
+            if document is None:
+                counts["failed_pages"] += 1
+                continue
+            counts["scanned_pages"] += 1
+            for entry in pages[page]:
+                batch.append((entry, document, page))
+                if len(batch) == 8:
+                    tasks.append(models.submit(complete, batch))
+                    batch = []
+                    if len(tasks) >= 8:
+                        tasks.popleft().result()
+        if batch:
+            tasks.append(models.submit(complete, batch))
+        for task in tasks:
+            task.result()
+        paper_count, paper_failures = papers.result()
+    typer.echo(f"回填完成：扫描网页 {counts['scanned_pages']}，网页失败 {counts['failed_pages']}；"
+               f"论文元数据 {paper_count}，未返回 {paper_failures}")
 
 
 @app.command("rescore-cards")

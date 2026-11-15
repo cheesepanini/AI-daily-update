@@ -47,6 +47,20 @@ def fetch_arxiv_document(url_or_id: str, timeout: int = 20) -> SourceDocument:
     return parse_arxiv_atom(response.text, requested_id=arxiv_id)
 
 
+def fetch_arxiv_metadata(ids: list[str]) -> dict[str, SourceDocument]:
+    response = requests.get(
+        ARXIV_API_URL, params={"id_list": ",".join(ids), "max_results": len(ids)}, timeout=25,
+        headers={"User-Agent": "AI-Daily-Update/0.2 (news metadata)"},
+    )
+    response.raise_for_status()
+    try:
+        documents = parse_arxiv_feed(response.text)
+    except ET.ParseError as exc:
+        raise ValueError("arXiv did not return a valid Atom feed") from exc
+    exact = {extract_arxiv_id(doc.url): doc for doc in documents if doc.published}
+    return {arxiv_id: exact[arxiv_id] for arxiv_id in ids if arxiv_id in exact}
+
+
 def search_latest_arxiv(
     categories: list[str],
     max_results: int = 10,

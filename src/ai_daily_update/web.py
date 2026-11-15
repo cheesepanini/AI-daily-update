@@ -1485,6 +1485,8 @@ def create_app(root: Path | None = None) -> FastAPI:
                     record = {"id": image_id, "url": url, "page": card_source_page(metadata),
                               "card_source": metadata.get("source_url"), "caption": candidate["caption"],
                               "credit": credit, "approved_at": now_iso(settings.timezone)}
+                    if candidate.get("license") == "CC BY 4.0":
+                        record["license"] = candidate["license"]
                     images.insert(0 if main else len(images), record)
                     metadata["approved_images"] = images
                 elif action == "withdraw":
