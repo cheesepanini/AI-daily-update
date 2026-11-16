@@ -1465,7 +1465,7 @@ def create_app(root: Path | None = None) -> FastAPI:
             if action == "preview":
                 if not any(item["url"] == url for item in image_candidates(snapshot)):
                     raise ValueError("候选图已变化，请刷新卡片")
-                image_id = prepare_image(settings.root, url)
+                image_id = prepare_image(settings.root, url, source_page=card_source_page(snapshot))
             with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
                 card = read_card(path)
                 metadata = card.metadata

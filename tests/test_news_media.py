@@ -93,6 +93,19 @@ def test_aiera_uses_exact_original_post_and_skips_generic_site_art(monkeypatch):
     assert [item["url"] for item in doc.images] == ["https://aiera.com.cn/wp-content/uploads/photo.png"]
 
 
+def test_qbitai_image_uses_its_original_article_origin(tmp_path, monkeypatch):
+    url = "https://i.qbitai.com/wp-content/uploads/original.webp"
+    sent = []
+    def download(url, *args, **kwargs):
+        sent.append(kwargs.get("referer"))
+        return url, b"image body"
+    monkeypatch.setattr(news_media, "download_public", download)
+    monkeypatch.setattr(news_media, "store_news_image", lambda root, data: "image-id")
+    news_media.prepare_image(tmp_path, url, source_page="https://www.qbitai.com/2026/11/story.html")
+    news_media.prepare_image(tmp_path, url, source_page="https://example.org/story.html")
+    assert sent == ["https://www.qbitai.com/", None]
+
+
 def test_concurrent_searches_serialize_bulk_date_index_refresh(tmp_path, monkeypatch):
     settings = load_settings(tmp_path)
     for number in range(4):
@@ -230,7 +243,7 @@ def test_arxiv_figures_crosscheck_exact_paper_and_generate_private_preview(tmp_p
     documents = {abs_page: abs_html, html_page: html}
     monkeypatch.setattr(news_media, "download_public", lambda url, *_: (url, documents[url]))
     preview = "a" * 64
-    monkeypatch.setattr(news_media, "prepare_image", lambda root, url: preview)
+    monkeypatch.setattr(news_media, "prepare_image", lambda root, url, **kwargs: preview)
     document = news_media.preview_licensed_figures(tmp_path, news_media.fetch_news_evidence(abs_page))
     assert document.published == "2026-11-12"
     assert [item["url"] for item in document.images] == [f"{html_page}/figure1.png"]

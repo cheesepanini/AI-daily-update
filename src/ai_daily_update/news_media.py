@@ -74,9 +74,10 @@ def _wait_arxiv_slot(host: str) -> None:
         slot.write_text(str(time.time()))
 
 
-def download_public(url: str, limit: int, expected_type: str | tuple[str, ...]) -> tuple[str, bytes]:
+def download_public(url: str, limit: int, expected_type: str | tuple[str, ...], *, referer: str = "") -> tuple[str, bytes]:
     """Fetch a bounded public resource, pinning the checked IP on each hop."""
     deadline = time.monotonic() + 20
+    original_host = urlsplit(url).hostname if referer else ""
     for _ in range(4):
         if len(url) > 2048 or "\\" in url or any(char.isspace() for char in url):
             raise ValueError("来源地址无效")
@@ -106,8 +107,11 @@ def download_public(url: str, limit: int, expected_type: str | tuple[str, ...]) 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ValueError("来源请求超时")
-            response = pool.urlopen("GET", target, headers={"Host": f"[{hostname}]" if ":" in hostname else hostname,
-                                                           "Accept-Encoding": "gzip", "User-Agent": "AI-Daily-Update/0.2"},
+            headers = {"Host": f"[{hostname}]" if ":" in hostname else hostname,
+                       "Accept-Encoding": "gzip", "User-Agent": "AI-Daily-Update/0.2"}
+            if referer and parts.scheme == "https" and parts.hostname == original_host:
+                headers["Referer"] = referer
+            response = pool.urlopen("GET", target, headers=headers,
                                     timeout=urllib3.Timeout(connect=min(4, remaining), read=min(4, remaining)),
                                     redirect=False, retries=False, preload_content=False)
             if response.status in {301, 302, 303, 307, 308} and response.headers.get("Location"):
@@ -391,7 +395,7 @@ def preview_licensed_figures(root: Path, document: SourceDocument) -> SourceDocu
         if remaining and attempts and item.get("license") == "CC BY 4.0":
             attempts -= 1
             try:
-                item = {**item, "preview": prepare_image(root, item["url"])}
+                item = {**item, "preview": prepare_image(root, item["url"], source_page=document.url)}
                 remaining -= 1
             except (OSError, ValueError, urllib3.exceptions.HTTPError, Image.DecompressionBombError):
                 pass
@@ -405,10 +409,14 @@ def image_path(root: Path, image_id: str, size: str) -> Path:
     return root / "data" / "news_images" / image_id[:2] / f"{image_id}-{size}.jpg"
 
 
-def prepare_image(root: Path, url: str) -> str:
+def prepare_image(root: Path, url: str, *, source_page: str = "") -> str:
     if not is_article_image(url):
         raise ValueError("候选图是网页装饰或占位图")
-    final, data = download_public(url, MAX_IMAGE_BYTES, ("image/", "application/octet-stream"))
+    args = (url, MAX_IMAGE_BYTES, ("image/", "application/octet-stream"))
+    if urlsplit(url).hostname == "i.qbitai.com" and urlsplit(source_page).hostname in {"www.qbitai.com", "qbitai.com"}:
+        final, data = download_public(*args, referer="https://www.qbitai.com/")
+    else:
+        final, data = download_public(*args)
     if not is_article_image(final):
         raise ValueError("候选图已跳转到网页装饰或占位图")
     return store_news_image(root, data)
