@@ -53,6 +53,46 @@ def test_qbitai_keeps_article_images_and_uses_the_bylines_publication_date():
     assert [image["url"] for image in document.images] == ["https://www.qbitai.com/article-photo.png"]
 
 
+def test_article_media_filters_default_avatar_and_finds_responsive_and_structured_images():
+    document = extract_document_from_html("https://www.qbitai.com/news", """
+        <meta property="og:image" content="/wp-content/themes/liangziwei/imagesnew/head.jpg">
+        <script type="application/ld+json">{"@type":"NewsArticle","url":"/news","image":{"contentUrl":"/launch.webp"}}</script>
+        <article>
+          <div class="author-info"><img src="/otherwise-anonymous.jpg"></div>
+          <picture><source srcset="/robot-480.webp 480w, /robot-960.webp 960w">
+                   <img src="/loading-placeholder.gif"></picture>
+          <video poster="/demo-poster.jpg"></video>
+        </article>
+    """)
+    assert [i["url"].rsplit("/", 1)[-1] for i in document.images] == [
+        "launch.webp", "robot-960.webp", "demo-poster.jpg",
+    ]
+    original = "https://www.qbitai.com/news"
+    values = {"source_url": original, "approved_images": [
+        {"id": next(iter(news_media._PLACEHOLDER_IDS)), "url": "https://example.org/copied.jpg",
+         "page": original, "card_source": original},
+        {"id": "c" * 64, "url": "https://www.qbitai.com/wp-content/themes/liangziwei/imagesnew/head.jpg",
+         "page": original, "card_source": original},
+        {"id": "d" * 64, "url": "https://www.qbitai.com/news-photo.jpg", "page": original, "card_source": original},
+    ]}
+    assert [item["id"] for item in news_media.approved_images(values, "sample")] == ["d" * 64]
+
+
+def test_aiera_uses_exact_original_post_and_skips_generic_site_art(monkeypatch):
+    article = "https://aiera.com.cn/2026/08/30/other/admin/111352/report"
+    def download(url, *args):
+        assert url == "https://aiera.com.cn/wp-json/wp/v2/posts/111352?_embed=1"
+        return url, json.dumps({
+            "id": 111352, "title": {"rendered": "发布说明"}, "date": "2026-08-30T11:20:00",
+            "content": {"rendered": '<p>原文</p><img src="/wp-content/uploads/photo.png">'},
+            "_embedded": {"wp:featuredmedia": [{"source_url": "https://aiera.com.cn/og-qishilu.jpg"}]},
+        }).encode()
+    monkeypatch.setattr(news_media, "download_public", download)
+    doc = news_media.fetch_news_evidence(article)
+    assert doc.url == article and doc.published == "2026-08-30T11:20:00"
+    assert [item["url"] for item in doc.images] == ["https://aiera.com.cn/wp-content/uploads/photo.png"]
+
+
 def test_concurrent_searches_serialize_bulk_date_index_refresh(tmp_path, monkeypatch):
     settings = load_settings(tmp_path)
     for number in range(4):
@@ -184,7 +224,7 @@ def test_arxiv_figures_crosscheck_exact_paper_and_generate_private_preview(tmp_p
     html_page = f"https://arxiv.org/html/{paper}"
     abs_html = b'<meta name="citation_online_date" content="2026/11/12"><div class="license"><a href="https://creativecommons.org/licenses/by/4.0/">view license</a></div>'
     html = b'''<span class="ltx_personname">Example Author</span>
-    <figure><img src="figure1.png"><figcaption>Figure 1: Architecture</figcaption></figure>
+    <figure><img src="2611.12345v1/figure1.png"><figcaption>Figure 1: Architecture</figcaption></figure>
     <figure><img src="figure2.png"><figcaption>Figure 2: Reproduced with permission</figcaption></figure>
     <figure><img src="/html/2611.12345v2/other.png"><figcaption>Figure 3: Model</figcaption></figure>'''
     documents = {abs_page: abs_html, html_page: html}
@@ -219,7 +259,9 @@ def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch)
     client = TestClient(create_app(tmp_path))
     assert "旧记录日期 · 待核实" in client.get("/public/featured").text
     assert not BeautifulSoup(client.get("/public/cards/sample").text, "html.parser").select('img[src*="unapproved.png"]')
-    assert not BeautifulSoup(client.get("/public/featured").text, "html.parser").select(".public-card-thumbnail")
+    no_photo = BeautifulSoup(client.get("/public/featured").text, "html.parser")
+    assert not no_photo.select(".public-card-thumbnail")
+    assert no_photo.select_one(".public-card-no-image").get_text(strip=True) == "本条消息暂无图片"
     client.post("/actions/card-event-date", data={"card_id": "sample", "review_both": "true",
                 "event_date": "", "reported_date": "2026-07-08"})
     dates = BeautifulSoup(client.get("/public/featured").text, "html.parser").select_one(".public-card-date")
@@ -252,6 +294,7 @@ def test_public_dates_and_reviewed_images_follow_the_card(tmp_path, monkeypatch)
     with Image.open(BytesIO(response.content)) as thumb:
         assert max(thumb.size) == 480
     assert asset in client.get("/public/featured").text
+    assert "本条消息暂无图片" not in client.get("/public/featured").text
     client.post("/actions/card-event-date", data={"card_id": "sample", "review_both": "true",
                 "event_date": "2026-07-08", "reported_date": "2026-07-08"})
     for route in ("/public/featured", "/public/cards/sample", "/public/reports?period=day&day=2026-07-08",

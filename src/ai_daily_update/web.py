@@ -2115,7 +2115,7 @@ def sync_public_search(settings: Settings, connection: Any) -> None:
             key = str(path)
             seen.add(key)
             stat = path.stat()
-            if known.get(key) == (stat.st_mtime_ns, stat.st_size, 2):
+            if known.get(key) == (stat.st_mtime_ns, stat.st_size, 3):
                 continue
             card = read_card(path)
             item = card_list_item(path, card.metadata, card.content)
@@ -2583,7 +2583,7 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
     search_fields = {key: value.casefold() for key, value in search_fields.items()}
     search_fields["all"] = " ".join([*search_fields.values(), " ".join(metadata.get("topics", []) or [])]).casefold()
     return {
-        "display_version": 2,
+        "display_version": 3,
         **dates,
         "images": approved_images(metadata, str(metadata.get("id", path.stem))),
         "path": path,

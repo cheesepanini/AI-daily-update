@@ -20,7 +20,9 @@ from ai_daily_update.config import Settings, load_settings
 from ai_daily_update.feedback.events import append_feedback_event
 from ai_daily_update.learning import choose_news_concepts_with_llm, load_catalog
 from ai_daily_update.llm.client import OpenAIClient
-from ai_daily_update.news_media import SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures
+from ai_daily_update.news_media import (
+    SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures, prioritize_card_images,
+)
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
     apply_content_date,
@@ -495,6 +497,7 @@ def _run_daily_pipeline_locked(
             metadata = apply_content_date(metadata, candidate, content)
             if source_document:
                 source_document = infer_source_events(llm, [(candidate.title, source_document, candidate.digest_item_index)])[0]
+                source_document = prioritize_card_images(llm, source_document, candidate.title)
                 source_document = preview_licensed_figures(settings.root, source_document)
                 apply_source_evidence(metadata, candidate, source_document)
                 metadata["source_evidence_scan"] = SOURCE_SCAN_VERSION

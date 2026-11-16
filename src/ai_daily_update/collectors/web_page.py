@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -11,6 +11,49 @@ from ai_daily_update.collectors.arxiv import extract_arxiv_id, fetch_arxiv_docum
 from ai_daily_update.collectors.document import SourceDocument, normalize_text
 from ai_daily_update.collectors.encoding import fix_response_encoding
 from ai_daily_update.utils.dates import written_dates
+
+
+_ARTICLE_TYPES = {"NewsArticle", "Article", "BlogPosting", "TechArticle", "ScholarlyArticle", "ReportageNewsArticle"}
+_PAGE_DECORATION = re.compile(
+    r"(?:^|[/_. -])(?:avatars?|avatarimg|logos?|placeholder|icons?|qrcode|qr-code|pixel|tracking|spacer|"
+    r"gravatar|user[-_ ]?pic|profile[-_ ]?(?:picture|photo)|default[-_ ]?(?:head|image)|"
+    r"author[-_ ]?(?:avatar|photo|info)|article_info)(?:$|[/_. -])|默认头像|用户头像|作者头像", re.I,
+)
+
+
+def is_article_image(url: str, caption: str = "") -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    path = unquote(parts.path).lower()
+    if parts.scheme not in {"https", "http"} or not parts.hostname:
+        return False
+    if parts.hostname.removeprefix("www.") == "qbitai.com" and path.endswith("/liangziwei/imagesnew/head.jpg"):
+        return False
+    if parts.hostname == "aiera.com.cn" and path == "/og-qishilu.jpg":
+        return False
+    return not (_PAGE_DECORATION.search(path) or _PAGE_DECORATION.search(str(caption or "")))
+
+
+def structured_articles(soup: BeautifulSoup):
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or "")
+        except ValueError:
+            continue
+        entries = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            entries = [*entries, *data["@graph"]]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            kind = entry.get("@type", [])
+            kinds = [kind] if isinstance(kind, str) else kind
+            if isinstance(kinds, list) and any(isinstance(v, str) and v in _ARTICLE_TYPES for v in kinds):
+                yield entry
 
 
 def fetch_source_document(url: str, timeout: int = 20) -> SourceDocument:
@@ -38,12 +81,14 @@ def fetch_source_document(url: str, timeout: int = 20) -> SourceDocument:
 def extract_document_from_html(url: str, html: str | bytes) -> SourceDocument:
     soup = BeautifulSoup(html, "html.parser")
     published_value = extract_publication_time(soup, url)
-    for element in soup(["script", "style", "noscript", "svg", "template"]):
-        element.decompose()
     title = extract_title(soup) or url
     description = extract_description(soup)
-    article = soup.select_one("#mp-editor, #vs, .article-content, .entry-content, .c-article-body, .ltx_document")
+    article = soup.select_one("#mp-editor, #vs, [itemprop=articleBody], .article-content, .article-body, "
+                              ".entry-content, .post-content, .c-article-body, .ltx_document, .newsxq-editbox")
     article = article or soup.select_one("article, .article") or soup.select_one("main")
+    images = extract_image_candidates(url, soup, article)
+    for element in soup(["script", "style", "noscript", "svg", "template"]):
+        element.decompose()
     main = article or soup.body or soup
     text = normalize_text(main.get_text("\n"))
     event = re.search(r"^(?:事件日期|事件时间|发生日期|发生时间)[：:]\s*(?:\d{4}-\d{1,2}-\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:\s|$)", text, re.MULTILINE)
@@ -65,7 +110,7 @@ def extract_document_from_html(url: str, html: str | bytes) -> SourceDocument:
             event_text = f"期刊原文上线发表 {published_value}"
     return SourceDocument(url=url, title=title, description=description, text=text,
                           published=published_value, event_date_text=event_text,
-                          images=extract_image_candidates(url, soup, article))
+                          images=images)
 
 
 def extract_publication_time(soup: BeautifulSoup, url: str) -> str:
@@ -74,21 +119,10 @@ def extract_publication_time(soup: BeautifulSoup, url: str) -> str:
         value = published.get("content") or published.get("datetime")
         if value:
             return value
-    for script in soup.select('script[type="application/ld+json"]'):
-        try:
-            data = json.loads(script.string or "")
-        except ValueError:
-            continue
-        entries = data if isinstance(data, list) else [data]
-        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
-            entries = [*entries, *data["@graph"]]
-        for entry in entries:
-            kind = entry.get("@type", []) if isinstance(entry, dict) else []
-            kinds = [kind] if isinstance(kind, str) else kind
-            if isinstance(kinds, list) and any(v in ("NewsArticle", "Article", "BlogPosting", "TechArticle", "ScholarlyArticle", "ReportageNewsArticle") for v in kinds):
-                value = entry.get("datePublished")
-                if isinstance(value, str):
-                    return value
+    for entry in structured_articles(soup):
+        value = entry.get("datePublished")
+        if isinstance(value, str):
+            return value
     for name in ("citation_online_date", "citation_publication_date", "prism.publicationDate", "citation_date"):
         meta = soup.find("meta", attrs={"name": name})
         if meta and meta.get("content"):
@@ -118,30 +152,59 @@ def extract_publication_time(soup: BeautifulSoup, url: str) -> str:
 
 def extract_image_candidates(url: str, soup: BeautifulSoup, article) -> tuple[dict[str, str], ...]:
     candidates = {}
-    cover = soup.select_one('meta[property="og:image"], meta[name="twitter:image"]')
-    images = [(cover.get("content"), "报道封面")] if cover else []
+    covers = soup.select('meta[property="og:image"], meta[property="og:image:secure_url"], '
+                         'meta[property="og:image:url"], meta[name="twitter:image"], meta[name="twitter:image:src"], '
+                         'meta[itemprop="image"], link[rel="image_src"]')
+    images = [(cover.get("content") or cover.get("href"), "报道封面") for cover in covers]
+    for entry in structured_articles(soup):
+        slug = entry.get("url")
+        if isinstance(slug, str):
+            try:
+                offer, article_url = urlsplit(urljoin(url, slug)), urlsplit(url)
+                if offer.hostname != article_url.hostname or offer.path.rstrip("/") != article_url.path.rstrip("/"):
+                    continue
+            except ValueError:
+                continue
+        values = entry.get("image", [])
+        for value in values if isinstance(values, list) else [values]:
+            if isinstance(value, str):
+                images.append((value, "报道封面"))
+            elif isinstance(value, dict):
+                images.append((value.get("contentUrl") or value.get("url"), str(value.get("caption") or "报道封面")))
     if article:
-        for img in article.find_all("img", limit=120):
-            if img.find_parent(["aside", "header", "nav", "footer"]) or img.find_parent(class_="c-article-recommendations-list"):
+        for img in article.select("img, video[poster]", limit=150):
+            parents = [img, *img.parents]
+            if any(node.name in {"aside", "header", "nav", "footer"}
+                   or node.get("role") == "navigation"
+                   or "c-article-recommendations-list" in node.get("class", [])
+                   or _PAGE_DECORATION.search(" ".join(node.get("class", [])))
+                   for node in parents):
                 continue
             if img.get("width") in {"1", "2"} or img.get("height") in {"1", "2"}:
                 continue
-            srcset = img.get("data-srcset") or img.get("srcset") or ""
-            raw = img.get("data-src") or img.get("data-original") or img.get("data-lazy-src")
-            if not raw and srcset:
+            picture = img.find_parent("picture")
+            sources = list(picture.select("source")) if picture else []
+            choices = [img.get(name) for name in ("data-src", "data-original", "data-lazy-src", "data-original-src", "poster")]
+            for source in [img, *sources]:
+                srcset = source.get("data-srcset") or source.get("srcset") or ""
                 options = [option.strip().split() for option in srcset.split(",") if option.strip()]
-                raw = options[-1][0] if options else ""
+                if options:
+                    choices.append(options[-1][0])
+            choices.append(img.get("src"))
             figure = img.find_parent("figure")
             figcaption = figure.find("figcaption") if figure else None
             caption = figcaption.get_text(" ", strip=True) if figcaption else img.get("alt")
-            images.append((raw or img.get("src"), caption or "报道正文图"))
+            images.extend((choice, caption or "报道正文图") for choice in dict.fromkeys(choices))
     for raw, caption in images:
-        if not raw or len(raw) > 2000:
+        if not isinstance(raw, str) or not raw or len(raw) > 2000:
             continue
-        image_url = urljoin(url, raw.strip())
-        if image_url.startswith(("https://", "http://")) and not re.search(r"[/_-](?:logo|placeholder|avatar|icon|qrcode|pixel|tracking)[-_./]", image_url, re.I):
+        try:
+            image_url = urljoin(url, raw.strip())
+        except ValueError:
+            continue
+        if is_article_image(image_url, caption):
             candidates.setdefault(image_url, {"url": image_url, "caption": caption.strip()[:160]})
-        if len(candidates) == 8:
+        if len(candidates) == 12:
             break
     return tuple(candidates.values())
 

@@ -19,6 +19,7 @@
       {% if card.source_label %} · 来源：{{ card.source_label }}{% endif %}
       {% if card.topics %} · {% for topic in card.topics %}<a href="/public/topics/{{ topic | urlencode }}">{{ topic_labels.get(topic, topic) }}</a>{% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
     </div>
+    {% if not card.images %}<p class="subtle public-card-no-image">本条消息暂无图片</p>{% endif %}
     {% if card.other_sources %}
     <details><summary>另有 {{ card.other_sources | length }} 条已确认的同事件报道</summary>
       <ul>{% for source in card.other_sources %}<li><a href="{{ source.public_detail_url }}">{{ source.source_label or source.title }}</a>：{{ source.title }}</li>{% endfor %}</ul>

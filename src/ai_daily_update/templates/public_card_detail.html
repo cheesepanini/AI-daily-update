@@ -27,6 +27,7 @@
     {% if card.source_label %}<div><span>来源</span><strong>{{ card.source_label }}</strong></div>{% endif %}
   </div>
   {% with images=card.images %}{% include '_news_image_group.html' %}{% endwith %}
+  {% if not card.images %}<p class="subtle">本条消息暂无图片</p>{% endif %}
   <div class="report-rendered card-content">{{ content_html | safe }}</div>
 </section>
 
