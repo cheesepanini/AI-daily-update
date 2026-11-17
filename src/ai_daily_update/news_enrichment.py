@@ -158,7 +158,15 @@ def enrich_news_sources(llm, document: SourceDocument, title: str, *, summary: s
     if llm.available:
         found = {item['url']: item for item in document.links}
         found.update((url, {'url': url, 'title': url}) for url in related_urls)
-        found.update((item['url'], item) for item in search_event_pages(title))
+        queries = _json_reply(llm,
+            '为这条具体消息提炼最多2条网页检索词，返回JSON字符串数组。每条保留原文中的独特产品名、'
+            '论文名、版本号和事件关键词，删除宣传形容词与无关背景。优先用简短的6至12个关键词组合，'
+            '可分别检索原文语言和中文。不得发明产品名称、版本或事实；不要输出URL。',
+            {'title': title, 'summary': (summary or document.description or document.text)[:1800]})
+        queries = list(dict.fromkeys(query.strip() for query in queries
+                                    if isinstance(query, str) and 4 <= len(query.strip()) <= 160))[:2]
+        for query in queries or [title]:
+            found.update((item['url'], item) for item in search_event_pages(query))
         candidates = [item for item in found.values() if item['url'] != original.url
                       and urlsplit(item['url']).scheme in {'http', 'https'}
                       and urlsplit(item['url']).path not in {'', '/'}][:30]
@@ -167,7 +175,7 @@ def enrich_news_sources(llm, document: SourceDocument, title: str, *, summary: s
             '优先发布方公告、论文项目页、代码仓库和独立媒体的同事件报道。排除首页、社交分享、'
             '同公司其他新闻、宽泛相关页面和其他版本。只返回最可能对应同一事件的候选index数组，最多4个；没有就返回[]。',
             {'title': title, 'summary': (summary or document.description or document.text)[:2500],
-             'candidates': [{'index': i, **item} for i, item in enumerate(candidates)]})
+             'candidates': [{'index': i, **item} for i, item in enumerate(candidates)]}) if candidates else []
         fetched = []
         for index in dict.fromkeys(i for i in selected if type(i) is int and 0 <= i < len(candidates)):
             url = candidates[index]['url']

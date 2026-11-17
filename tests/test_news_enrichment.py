@@ -3,6 +3,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 from PIL import Image
+from fastapi.testclient import TestClient
 
 from ai_daily_update import news_enrichment as enrichment, news_media
 from ai_daily_update.cli import _prompt_for_candidate
@@ -11,6 +12,7 @@ from ai_daily_update.collectors.web_page import extract_document_from_html
 from ai_daily_update.processors.card_builder import apply_source_evidence
 from ai_daily_update.processors.candidates import Candidate
 from ai_daily_update.storage.markdown import read_card, write_card
+from ai_daily_update.web import create_app
 
 
 def test_same_event_requires_actual_body_quote_and_specific_shared_identity():
@@ -36,7 +38,7 @@ def test_cross_source_material_enters_generation_and_preserves_image_origin(monk
     original = SourceDocument(first, 'Orion 3 release', '', 'Orion 3 is released.')
     other = SourceDocument(second, 'Orion 3 coding demo', '', 'Orion 3 is released with a new coding mode.',
                            images=({'url': image_url, 'caption': 'Orion 3 coding demonstration'},))
-    replies = iter([[0], [{'index': 0, 'anchor': 'Orion 3', 'quote': other.text}]])
+    replies = iter([['Orion 3 release'], [0], [{'index': 0, 'anchor': 'Orion 3', 'quote': other.text}]])
     llm = SimpleNamespace(available=True, generate_learning_reply=lambda *_: json.dumps(next(replies)))
     monkeypatch.setattr(enrichment, 'search_event_pages', lambda _: [{'url': second, 'title': other.title}])
     monkeypatch.setattr(enrichment, '_fetch_related', lambda _: other)
@@ -62,8 +64,17 @@ def test_cross_source_material_enters_generation_and_preserves_image_origin(monk
     approved = news_media.approved_images(metadata, 'orion')
     assert requested == [(image_url, second)]
     assert approved[0]['page'] == first and approved[0]['source_page'] == second
+    metadata.update(title_zh='Orion 3 发布', review_status='accepted', date='2026-11-10', track='industry')
+    (tmp_path / 'config').mkdir()
+    (tmp_path / 'config/app.yaml').write_text('auth: {enabled: false}\n', encoding='utf-8')
+    write_card(tmp_path / 'notes/cards/orion.md', metadata, '## 一句话结论\nOrion 3 发布。')
+    client = TestClient(create_app(tmp_path))
+    html = client.get('/public/cards/orion').text
+    assert f'href="{second}"' in html and '补充报道与资料' in html
     metadata['source_url'] = 'https://primary.example/different-story'
     assert news_media.approved_images(metadata, 'orion') == []
+    write_card(tmp_path / 'notes/cards/orion.md', metadata, '## 一句话结论\nOrion 3 发布。')
+    assert '补充报道与资料' not in client.get('/public/cards/orion').text
 
 
 def test_digest_does_not_publish_its_parent_cover_or_another_items_picture(monkeypatch):
