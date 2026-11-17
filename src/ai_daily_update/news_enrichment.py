@@ -182,6 +182,7 @@ def enrich_news_sources(llm, document: SourceDocument, title: str, *, summary: s
             {'title': title, 'summary': (summary or document.description or document.text)[:2500],
              'candidates': [{'index': i, **item} for i, item in enumerate(candidates)]}) if candidates else []
         fetched = []
+        selected = [item.get('index') if isinstance(item, dict) else item for item in selected]
         for index in dict.fromkeys(i for i in selected if type(i) is int and 0 <= i < len(candidates)):
             url = candidates[index]['url']
             # arXiv pages are handled through the paper flow, which respects its crawl interval.

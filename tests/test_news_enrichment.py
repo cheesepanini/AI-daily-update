@@ -42,7 +42,8 @@ def test_cross_source_material_enters_generation_and_preserves_image_origin(monk
     original = SourceDocument(first, 'Orion 3 release', '', 'Orion 3 is released.')
     other = SourceDocument(second, 'Orion 3 coding demo', '', 'Orion 3 is released with a new coding mode.',
                            images=({'url': image_url, 'caption': 'Orion 3 coding demonstration'},))
-    replies = iter([['Orion 3 release'], [0], [{'index': 0, 'anchor': 'Orion 3', 'quote': other.text}]])
+    replies = iter([['Orion 3 release'], [{'index': 0, 'url': 'https://invented.example/not-fetched'}],
+                    [{'index': 0, 'anchor': 'Orion 3', 'quote': other.text}]])
     llm = SimpleNamespace(available=True, generate_learning_reply=lambda *_: json.dumps(next(replies)))
     monkeypatch.setattr(enrichment, 'search_event_pages', lambda _: [{'url': second, 'title': other.title}])
     monkeypatch.setattr(enrichment, '_fetch_related', lambda _: other)

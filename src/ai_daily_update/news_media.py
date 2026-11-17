@@ -275,6 +275,7 @@ def prioritize_card_images(llm, document: SourceDocument, title: str) -> SourceD
         return document
     if not isinstance(selected, list):
         return document
+    selected = [item.get('index') if isinstance(item, dict) else item for item in selected]
     ordered = {i: images[i] for i in selected if type(i) is int and 0 <= i < len(images)}
     ordered.update((i, item) for i, item in enumerate(images) if i not in ordered)
     return replace(document, images=tuple(ordered.values()))
