@@ -52,6 +52,7 @@ def test_graph_distinguishes_section_references_from_internal_point_numbers():
     [chapter] = textbook_graph({"items": [concept, detail]})
     assert chapter["number"] == "3"
     assert [node["sections"] for node in chapter["nodes"]] == [["3.4.2", "7.2.3"], ["3.4.2"]]
+    assert chapter["nodes"][0]["summary"] == concept["explanation"]
 
 
 def setup_site(tmp_path, enabled=True):

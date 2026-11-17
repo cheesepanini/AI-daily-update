@@ -59,13 +59,15 @@ def textbook_graph(catalog: dict[str, Any]) -> list[dict]:
         chapter = sections[0].split(".")[0] if sections else ""
         group = chapters.setdefault(chapter, {"number": chapter, "title": f"第{chapter}章" if chapter else "其他知识点", "id": "", "nodes": []})
         if item["type"] == "synthesis":
-            group.update(id=item["id"], title=item["title"].replace("学习地图：", " · "), sections=sections)
+            group.update(id=item["id"], title=item["title"].replace("学习地图：", " · "), sections=sections,
+                         summary=item.get("explanation", "")[:240])
             continue
         relations = item.get("prerequisites", {})
         group["nodes"].append({
             "id": item["id"], "title": item["title"], "type": item["type"], "sections": sections,
             "source_section": source_section,
             "aliases": item.get("aliases", []),
+            "summary": item.get("explanation", "")[:240],
             "required": [target for target in relations.get("required", []) if target in ids],
             "helpful": [target for target in relations.get("helpful", []) if target in ids],
         })

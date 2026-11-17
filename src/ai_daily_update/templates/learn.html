@@ -9,22 +9,32 @@
   </div>
   <div id="graph-search-results" class="graph-results" aria-live="polite" hidden></div>
   <div class="graph-frame">
-  <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="教材关系图，可拖动或滚动浏览">
+  <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="教材关系图，滚轮缩放，拖动平移，方向键移动，加减键缩放，0 回到总览" aria-describedby="graph-hint">
     <div id="graph-stage" class="graph-stage">
       <canvas id="graph-edges" aria-hidden="true"></canvas>
       {% for chapter in chapters %}
         {% if chapter.id %}
-        <a class="graph-node" data-graph-id="{{ chapter.id }}" data-kind="chapter" title="{{ chapter.title }}" href="/learn/concepts/{{ chapter.id | urlencode }}"><span>{{ chapter.title }}</span></a>
+        <a class="graph-node" data-graph-id="{{ chapter.id }}" data-kind="chapter" aria-label="{{ chapter.title }}" href="/learn/concepts/{{ chapter.id | urlencode }}"><span>{{ chapter.title }}</span></a>
         {% endif %}
         {% for node in chapter.nodes %}
-        <a class="graph-node" data-graph-id="{{ node.id }}" data-kind="{{ node.type }}" title="{{ node.title }} · {{ node.source_section }}" href="/learn/concepts/{{ node.id | urlencode }}"><span>{{ node.title }}</span></a>
+        <a class="graph-node" data-graph-id="{{ node.id }}" data-kind="{{ node.type }}" aria-label="{{ node.title }}" href="/learn/concepts/{{ node.id | urlencode }}"><span>{{ node.title }}</span></a>
         {% endfor %}
       {% endfor %}
     </div>
   </div>
+    <p id="graph-hint" class="graph-hint">滚轮缩放 · 拖动平移 · 悬停预览，点击固定</p>
+    <section id="graph-preview" class="graph-preview" aria-labelledby="graph-preview-title" hidden>
+      <button id="graph-preview-close" type="button" aria-label="关闭知识点预览">×</button>
+      <p id="graph-preview-kind" class="graph-preview-kind"></p>
+      <h2 id="graph-preview-title"></h2>
+      <p id="graph-preview-summary" class="graph-preview-summary"></p>
+      <p id="graph-preview-relations" class="graph-preview-relations"></p>
+      <a id="graph-preview-read" class="graph-preview-read">阅读知识点 <span aria-hidden="true">↗</span></a>
+    </section>
     <div class="graph-zoom" role="group" aria-label="缩放图谱">
       <button type="button" id="graph-zoom-out" aria-label="缩小">−</button>
       <button type="button" id="graph-fit">总览</button>
+      <output id="graph-zoom-value" aria-label="当前缩放比例">100%</output>
       <button type="button" id="graph-zoom-in" aria-label="放大">＋</button>
     </div>
     <button type="button" id="graph-plan-toggle" class="graph-plan-toggle" aria-controls="graph-plan" aria-haspopup="dialog" title="学习路径">
@@ -62,6 +72,6 @@
   </form>
 </dialog>
 <script id="textbook-graph-data" type="application/json">{{ chapters | tojson }}</script>
-<script src="/static/learning-graph.js?v=20261115-6" defer></script>
+<script src="/static/learning-graph.js?v=20261117-1" defer></script>
 <script src="/static/learning.js?v=20261115-5" defer></script>
 {% endblock %}

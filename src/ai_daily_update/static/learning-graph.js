@@ -57,29 +57,59 @@
   }
   let zoom = 1;
   let pathIds = new Set();
+  let camera = {x: 0, y: 0, zoom: 1};
+  let target = {...camera};
+  let animation;
+  let lastFrame = 0;
+  let renderedZoom;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-  function centerOn(x, y) {
-    const rect = stage.getBoundingClientRect();
-    const view = viewport.getBoundingClientRect();
-    viewport.scrollBy(rect.left + x * zoom - view.left - viewport.clientWidth / 2,
-                      rect.top + y * zoom - view.top - viewport.clientHeight / 2);
+  function renderCamera(time) {
+    const blend = reducedMotion.matches ? 1 : 1 - Math.exp(-Math.min(time - lastFrame, 64) / 45);
+    lastFrame = time;
+    let moving = false;
+    for (const key of ['x', 'y', 'zoom']) {
+      camera[key] += (target[key] - camera[key]) * blend;
+      if (Math.abs(target[key] - camera[key]) < (key === 'zoom' ? .0001 : .05)) camera[key] = target[key];
+      else moving = true;
+    }
+    stage.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
+    if (renderedZoom !== camera.zoom) {
+      renderedZoom = camera.zoom;
+      stage.style.setProperty('--graph-label-size', `${Math.max(15, 10 / camera.zoom)}px`);
+      stage.style.setProperty('--graph-hit-size', `${24 / camera.zoom}px`);
+      stage.classList.toggle('graph-compact', camera.zoom < .95);
+    }
+    positionPreview();
+    animation = moving ? requestAnimationFrame(renderCamera) : null;
   }
 
-  function setZoom(value, center = true) {
-    const rect = stage.getBoundingClientRect();
-    const view = viewport.getBoundingClientRect();
-    const x = (view.left + viewport.clientWidth / 2 - rect.left) / zoom;
-    const y = (view.top + viewport.clientHeight / 2 - rect.top) / zoom;
-    zoom = Math.max(.15, Math.min(2, value));
-    stage.style.zoom = zoom;
-    stage.style.setProperty('--graph-label-size', `${Math.max(15, 9 / zoom)}px`);
-    stage.classList.toggle('graph-compact', zoom < .4);
-    if (center) centerOn(x, y);
+  function moveCamera(next, immediate = false) {
+    target = next;
+    zoom = target.zoom;
+    if (immediate || reducedMotion.matches) camera = {...target};
+    byId('graph-zoom-value').value = `${Math.round(zoom * 100)}%`;
     status.textContent = `缩放 ${Math.round(zoom * 100)}%`;
+    if (!animation) {
+      lastFrame = performance.now();
+      animation = requestAnimationFrame(renderCamera);
+    }
+  }
+
+  function centerOn(x, y) {
+    moveCamera({x: viewport.clientWidth / 2 - x * zoom, y: viewport.clientHeight / 2 - y * zoom, zoom});
+  }
+
+  function setZoom(value, anchor = {x: viewport.clientWidth / 2, y: viewport.clientHeight / 2}) {
+    const nextZoom = Math.max(.15, Math.min(3, value));
+    const ratio = nextZoom / zoom;
+    moveCamera({x: anchor.x - (anchor.x - target.x) * ratio,
+                y: anchor.y - (anchor.y - target.y) * ratio, zoom: nextZoom});
   }
 
   function fit() {
-    setZoom(Math.min(viewport.clientWidth / width, viewport.clientHeight / height, 1), false);
+    hidePreview();
+    setZoom(Math.min((viewport.clientWidth - 48) / width, (viewport.clientHeight - 80) / height, 1));
     centerOn(width / 2, height / 2);
   }
 
@@ -91,7 +121,7 @@
     const left = Math.min(...xs), right = Math.max(...xs);
     const top = Math.min(...ys), bottom = Math.max(...ys);
     setZoom(Math.min(viewport.clientWidth / (right - left + 180),
-                     viewport.clientHeight / (bottom - top + 120), 1.2), false);
+                     viewport.clientHeight / (bottom - top + 120), 1.2));
     centerOn((left + right) / 2, (top + bottom) / 2);
     viewport.scrollIntoView({block: 'nearest', inline: 'nearest'});
   }
@@ -100,7 +130,7 @@
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, width, height);
-    const active = pathIds.size > 0;
+    const active = pathIds.size > 0 || activeId;
     const styles = {
       membership: [active ? '#51618135' : '#8499ba70', 1.4],
       helpful: [active ? '#7f99c542' : '#98afd096', 1.7],
@@ -112,7 +142,9 @@
       const to = positions.get(edge.target);
       if (!from || !to) continue;
       const highlight = selected(edge);
-      [ctx.strokeStyle, ctx.lineWidth] = highlight ? ['#ffd580', 4] : styles[edge.kind];
+      const connected = edge.source === activeId || edge.target === activeId;
+      [ctx.strokeStyle, ctx.lineWidth] = highlight ? ['#ffd580', 4] :
+        connected ? [edge.kind === 'required' ? '#87e6d0' : '#c4b5fd', 2.8] : styles[edge.kind];
       ctx.setLineDash(edge.kind === 'helpful' ? [6, 5] : []);
       const angle = Math.atan2(to.y - from.y, to.x - from.x);
       const tipX = to.x - (to.radius + 3) * Math.cos(angle);
@@ -134,12 +166,109 @@
     if (!link) return;
     stage.querySelector('.graph-located')?.classList.remove('graph-located');
     link.classList.add('graph-located');
-    if (zoom < .75) setZoom(1, false);
+    hidePreview();
+    if (zoom < .75) setZoom(1);
     const {x, y} = positions.get(id);
     centerOn(x, y);
     viewport.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     link.focus({ preventScroll: true });
   }
+
+  const preview = byId('graph-preview');
+  let activeId = null;
+  let pinned = false;
+  let previewTimer;
+  const neighbors = new Map([...nodes.keys()].map(id => [id, new Set([id])]));
+  for (const {source, target} of edges) {
+    neighbors.get(source)?.add(target);
+    neighbors.get(target)?.add(source);
+  }
+
+  function positionPreview() {
+    if (!activeId || preview.hidden) return;
+    const point = positions.get(activeId);
+    const x = camera.x + point.x * camera.zoom;
+    const y = camera.y + point.y * camera.zoom;
+    const gap = point.radius * camera.zoom + 18;
+    const maxX = viewport.clientWidth - preview.offsetWidth - 12;
+    const left = x + gap <= maxX ? x + gap : x - gap - preview.offsetWidth;
+    preview.style.left = `${Math.max(12, Math.min(maxX, left))}px`;
+    preview.style.top = `${Math.max(12, Math.min(viewport.clientHeight - preview.offsetHeight - 72, y - 28))}px`;
+  }
+
+  function hidePreview() {
+    clearTimeout(previewTimer);
+    if (!activeId) return;
+    links.get(activeId)?.removeAttribute('aria-describedby');
+    activeId = null;
+    pinned = false;
+    preview.hidden = true;
+    stage.classList.remove('graph-has-hover');
+    for (const link of links.values()) link.classList.remove('graph-hovered', 'graph-neighbor');
+    drawEdges();
+  }
+
+  function showPreview(id, pin = false) {
+    clearTimeout(previewTimer);
+    if (pinned && !pin) return;
+    if (activeId) links.get(activeId)?.removeAttribute('aria-describedby');
+    activeId = id;
+    pinned = pin;
+    const node = nodes.get(id);
+    const kind = node.type === 'concept' ? '概念' : node.type === 'microtopic' ? '细知识点' : '章节导读';
+    byId('graph-preview-kind').textContent = `${kind} · 教材 ${(node.sections || []).join('、')}${pin ? ' · 已固定' : ''}`;
+    byId('graph-preview-title').textContent = node.title;
+    byId('graph-preview-summary').textContent = node.summary || '查看完整内容，了解本知识点的解释与示例。';
+    const required = (node.required || []).map(id => nodes.get(id)?.title).filter(Boolean);
+    byId('graph-preview-relations').textContent = required.length ? `先修：${required.join('、')}` :
+      `直接关联 ${neighbors.get(id).size - 1} 个节点`;
+    byId('graph-preview-read').href = links.get(id).href;
+    links.get(id).setAttribute('aria-describedby', 'graph-preview-title graph-preview-summary');
+    for (const [nodeId, link] of links) {
+      link.classList.toggle('graph-hovered', nodeId === id);
+      link.classList.toggle('graph-neighbor', neighbors.get(id).has(nodeId));
+    }
+    stage.classList.add('graph-has-hover');
+    preview.hidden = false;
+    positionPreview();
+    drawEdges();
+  }
+
+  function scheduleHide() {
+    clearTimeout(previewTimer);
+    if (!pinned) previewTimer = setTimeout(() => {
+      if (!preview.contains(document.activeElement) && !stage.contains(document.activeElement)) hidePreview();
+    }, 180);
+  }
+  for (const [id, link] of links) {
+    link.addEventListener('pointerenter', event => {
+      if (event.pointerType !== 'touch' && !pointers.size && performance.now() >= suppressClickUntil) showPreview(id);
+    });
+    link.addEventListener('pointerleave', scheduleHide);
+    link.addEventListener('focus', () => showPreview(id, pinned));
+    link.addEventListener('blur', scheduleHide);
+    link.addEventListener('click', event => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showPreview(id, true);
+    });
+    link.draggable = false;
+  }
+  preview.addEventListener('pointerenter', () => clearTimeout(previewTimer));
+  preview.addEventListener('pointerleave', scheduleHide);
+  preview.addEventListener('focusin', () => clearTimeout(previewTimer));
+  preview.addEventListener('focusout', scheduleHide);
+  byId('graph-preview-close').addEventListener('click', () => {
+    viewport.focus({preventScroll: true});
+    hidePreview();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !preview.hidden) {
+      const restoreFocus = preview.contains(document.activeElement);
+      hidePreview();
+      if (restoreFocus) viewport.focus({preventScroll: true});
+    }
+  });
 
   function text(parent, tag, value) {
     const element = document.createElement(tag);
@@ -160,17 +289,67 @@
   byId('graph-zoom-in').addEventListener('click', () => setZoom(zoom * 1.25));
   byId('graph-zoom-out').addEventListener('click', () => setZoom(zoom / 1.25));
   byId('graph-fit').addEventListener('click', fit);
-  let drag = null;
+  const pointers = new Map();
+  let gesture = null;
+  let suppressClickUntil = 0;
+  function pointerGeometry() {
+    const points = [...pointers.values()];
+    const first = points[0], second = points[1] || first;
+    const rect = viewport.getBoundingClientRect();
+    return {x: (first.x + second.x) / 2 - rect.left - viewport.clientLeft,
+            y: (first.y + second.y) / 2 - rect.top - viewport.clientTop,
+            distance: Math.hypot(second.x - first.x, second.y - first.y)};
+  }
   viewport.addEventListener('pointerdown', event => {
-    if (event.pointerType !== 'mouse' || event.button !== 0 || event.target.closest('a')) return;
-    drag = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
-    viewport.setPointerCapture(event.pointerId);
-    viewport.classList.add('dragging');
+    if (event.button !== 0) return;
+    pointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+    gesture = {...pointerGeometry(), camera: {...camera}};
   });
   viewport.addEventListener('pointermove', event => {
-    if (drag) viewport.scrollTo(drag.left + drag.x - event.clientX, drag.top + drag.y - event.clientY);
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+    const point = pointerGeometry();
+    if (pointers.size === 1 && Math.hypot(point.x - gesture.x, point.y - gesture.y) < 5 && !viewport.classList.contains('dragging')) return;
+    hidePreview();
+    viewport.classList.add('dragging');
+    viewport.setPointerCapture(event.pointerId);
+    suppressClickUntil = performance.now() + 400;
+    const scale = gesture.distance > 0 ? point.distance / gesture.distance : 1;
+    const nextZoom = Math.max(.15, Math.min(3, gesture.camera.zoom * scale));
+    const ratio = nextZoom / gesture.camera.zoom;
+    moveCamera({x: point.x - (gesture.x - gesture.camera.x) * ratio,
+                y: point.y - (gesture.y - gesture.camera.y) * ratio, zoom: nextZoom}, true);
   });
-  viewport.addEventListener('lostpointercapture', () => { drag = null; viewport.classList.remove('dragging'); });
+  function endPointer(event) {
+    pointers.delete(event.pointerId);
+    if (pointers.size) gesture = {...pointerGeometry(), camera: {...camera}};
+    else { gesture = null; viewport.classList.remove('dragging'); }
+  }
+  viewport.addEventListener('pointerup', endPointer);
+  viewport.addEventListener('pointercancel', endPointer);
+  viewport.addEventListener('lostpointercapture', endPointer);
+  window.addEventListener('pointerup', endPointer);
+  viewport.addEventListener('click', event => {
+    if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+    else if (!event.target.closest('a')) hidePreview();
+  }, true);
+  viewport.addEventListener('wheel', event => {
+    event.preventDefault();
+    hidePreview();
+    const rect = viewport.getBoundingClientRect();
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
+    setZoom(zoom * Math.exp(-Math.max(-160, Math.min(160, delta)) * .0025),
+      {x: event.clientX - rect.left - viewport.clientLeft, y: event.clientY - rect.top - viewport.clientTop});
+  }, {passive: false});
+  viewport.addEventListener('keydown', event => {
+    const pan = {ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60]}[event.key];
+    if (pan) moveCamera({...target, x: target.x + pan[0], y: target.y + pan[1]});
+    else if (event.key === '+' || event.key === '=') setZoom(zoom * 1.25);
+    else if (event.key === '-') setZoom(zoom / 1.25);
+    else if (event.key === '0') fit();
+    else return;
+    event.preventDefault();
+  });
 
   const search = byId('graph-search');
   const results = byId('graph-search-results');
@@ -248,10 +427,14 @@
   canvas.width = width;
   canvas.height = height;
   fit();
-  if (zoom < .4 && viewport.clientWidth < 540) {
-    setZoom(.4, false);
-    centerOn(width / 2, height / 2);
-  }
+  moveCamera(target, true);
+  let viewSize = {width: viewport.clientWidth, height: viewport.clientHeight};
+  new ResizeObserver(() => {
+    const next = {width: viewport.clientWidth, height: viewport.clientHeight};
+    moveCamera({...target, x: target.x + (next.width - viewSize.width) / 2,
+                y: target.y + (next.height - viewSize.height) / 2}, true);
+    viewSize = next;
+  }).observe(viewport);
   drawEdges();
   locate(new URLSearchParams(location.search).get('node'));
 })();
