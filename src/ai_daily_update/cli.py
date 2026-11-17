@@ -21,8 +21,9 @@ from ai_daily_update.feedback.events import append_feedback_event
 from ai_daily_update.learning import choose_news_concepts_with_llm, load_catalog
 from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.news_media import (
-    SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures, prioritize_card_images,
+    SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures, publish_verified_images,
 )
+from ai_daily_update.news_enrichment import ENRICHMENT_VERSION, enrich_news_sources, enrich_saved_card
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
     apply_content_date,
@@ -111,6 +112,11 @@ Fetched description: {source_document.description}
 Fetched text excerpt:
 {source_document.text[:12000]}
 """
+    if source_document and source_document.supplementary_sources:
+        source_material += '\n已抓取并核对为同一事件的补充来源：\n' + '\n'.join(
+            f"URL: {item['url']}\n标题: {item['title']}\n匹配依据: {item['quote']}\n正文摘录: {item.get('excerpt', '')}"
+            for item in source_document.supplementary_sources
+        )
     related_material = "暂无明显相关的已有卡片。"
     if related_cards:
         related_material = "\n".join(
@@ -129,6 +135,8 @@ Fetched text excerpt:
 - 第一行必须是一级标题，格式为：# 知识卡片：中文标题。
 - 尽量使用如下小节：一句话结论、事件概述或研究问题、方法/产品要点、主要结果或产业意义、为什么重要、局限与不确定性、可用于图书/PPT/简报的角度、原始材料。
 - 参考下面的“已有相关卡片”，避免与它们重复陈述同一事实；如果本条是对它们的延续或更新，请在“与既有脉络的关系”或“为什么重要”中简要说明增量信息。
+- 综合已核对的同事件来源，把原始来源与补充报道的链接列入“原始材料”；各来源有冲突时说明分歧，不能拼接成未经证实的新事实。
+- 配图由采集流程从这些实际页面下载并署名，正文不要编造图片URL、外链图片或声称已核实图片细节。
 
 URL: {candidate.url}
 Track: {candidate.track}
@@ -482,6 +490,15 @@ def _run_daily_pipeline_locked(
                     metadata["title_en"] = source_document.title
             except Exception as exc:
                 typer.echo(f"warning: failed to fetch {candidate.url}: {exc}", err=True)
+            source_document = source_document or SourceDocument(
+                url=candidate.parent_url or candidate.url, title=candidate.title,
+                description=candidate.summary, text=candidate.summary,
+            )
+            try:
+                source_document = enrich_news_sources(llm, source_document, candidate.title,
+                                                      summary=candidate.summary, digest_index=candidate.digest_item_index)
+            except Exception as exc:
+                typer.echo(f"warning: supplementary sources unavailable for {candidate.url}: {exc}", err=True)
             content = None
             if llm.available:
                 try:
@@ -497,11 +514,12 @@ def _run_daily_pipeline_locked(
             metadata = apply_content_date(metadata, candidate, content)
             if source_document:
                 source_document = infer_source_events(llm, [(candidate.title, source_document, candidate.digest_item_index)])[0]
-                source_document = prioritize_card_images(llm, source_document, candidate.title)
                 source_document = preview_licensed_figures(settings.root, source_document)
                 apply_source_evidence(metadata, candidate, source_document)
                 metadata["source_evidence_scan"] = SOURCE_SCAN_VERSION
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
+            publish_verified_images(settings.root, metadata, source_document)
+            metadata['media_enrichment_version'] = ENRICHMENT_VERSION
             if content_from_llm and llm.available:
                 metadata.update(score_card_quality_with_llm(metadata, content, llm))
                 concept_ids = choose_news_concepts_with_llm(learning_catalog, metadata, content, llm)
@@ -847,6 +865,65 @@ def index_command() -> None:
     typer.echo(f"Indexed {indexed} card(s).")
     for warning in warnings:
         typer.echo(f"warning: {warning}", err=True)
+
+
+@app.command('news-media-enrich')
+def news_media_enrich(
+    since: str = typer.Option('', '--since', help='Inclusive collection/display date, YYYY-MM-DD; defaults to 30 days ago.'),
+    until: str = typer.Option('', '--until', help='Inclusive upper date, YYYY-MM-DD; defaults to today.'),
+    apply: bool = typer.Option(False, '--apply', help='Fetch, verify and publish event images; back up each changed card.'),
+    retry: bool = typer.Option(False, '--retry', help='Revisit cards already processed by this enrichment version.'),
+    limit: int = typer.Option(0, '--limit', min=0),
+    workers: int = typer.Option(4, '--workers', min=1, max=8),
+) -> None:
+    """Enrich a bounded historical period, preserving article text and review state."""
+    from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ai_daily_update.news_media import approved_images
+    from ai_daily_update.utils.dates import public_date_fields
+
+    settings = _settings()
+    end = date.fromisoformat(until) if until else today_in_timezone(settings.timezone)
+    start = date.fromisoformat(since) if since else end - timedelta(days=30)
+    if start > end:
+        raise typer.BadParameter('--since must not be after --until')
+    entries = []
+    for path in reversed(iter_cards(settings.markdown_root)):
+        metadata = read_card(path).metadata
+        if metadata.get('review_status') not in {'accepted', 'needs-review', 'later'}:
+            continue
+        collected = str(metadata.get('collected_date') or metadata.get('created_at') or metadata.get('date') or '')[:10]
+        displayed = public_date_fields(metadata)['display_date']
+        if not any(start.isoformat() <= value <= end.isoformat() for value in (collected, displayed)):
+            continue
+        if not retry and metadata.get('media_enrichment_version') == ENRICHMENT_VERSION:
+            continue
+        entries.append((bool(extract_arxiv_id(metadata.get('source_url', ''))), path,
+                        bool(approved_images(metadata, str(metadata.get('id', ''))))))
+    entries.sort(key=lambda entry: (entry[0], entry[2]))
+    if limit:
+        entries = entries[:limit]
+    typer.echo(f'配图范围 {start} 至 {end}：待处理 {len(entries)} 条，其中已有图片 {sum(entry[2] for entry in entries)} 条', color=False)
+    if not apply:
+        return
+    llm = _llm_client(settings)
+    counts = Counter()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        tasks = {pool.submit(enrich_saved_card, settings.root, path, llm): path for _, path, _ in entries}
+        for future in as_completed(tasks):
+            path = tasks[future]
+            try:
+                result = future.result()
+                counts['processed'] += 1
+                counts['images_added'] += result.get('added', 0)
+                counts['cards_with_images'] += bool(result.get('images'))
+                counts['cards_with_extra_sources'] += bool(result.get('sources'))
+                typer.echo(f'{counts["processed"]}/{len(entries)} {result}', color=False)
+            except Exception as exc:
+                counts['failed'] += 1
+                typer.echo(f'回填失败 {path.stem}: {type(exc).__name__}: {exc}', err=True)
+    rebuild_index(settings.markdown_root, settings.sqlite_path)
+    typer.echo(f'配图回填完成 {dict(counts)}', color=False)
 
 
 @app.command("news-media-audit")

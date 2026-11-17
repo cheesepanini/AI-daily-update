@@ -87,6 +87,13 @@ def extract_document_from_html(url: str, html: str | bytes) -> SourceDocument:
                               ".entry-content, .post-content, .c-article-body, .ltx_document, .newsxq-editbox")
     article = article or soup.select_one("article, .article") or soup.select_one("main")
     images = extract_image_candidates(url, soup, article)
+    links = {}
+    for link in (article or soup).select('a[href]'):
+        target = urljoin(url, link.get('href', '')).split('#')[0]
+        parts = urlsplit(target)
+        if (parts.scheme in {'http', 'https'} and parts.hostname and parts.hostname != urlsplit(url).hostname
+                and parts.path not in {'', '/'} and not parts.username):
+            links.setdefault(target, {'url': target, 'title': link.get_text(' ', strip=True)[:200]})
     for element in soup(["script", "style", "noscript", "svg", "template"]):
         element.decompose()
     main = article or soup.body or soup
@@ -103,14 +110,15 @@ def extract_document_from_html(url: str, html: str | bytes) -> SourceDocument:
         if not license_url:
             license_url = next((a["href"] for a in soup.select("a[href]") if a.get_text(strip=True) == "view license"), "")
         return SourceDocument(url=url, title=title, description=description, text=text,
-                              published=published_value, event_date_text=event_text, image_license=license_url)
+                              published=published_value, event_date_text=event_text, image_license=license_url,
+                              links=tuple(list(links.values())[:30]))
     if published_value and not event_text and urlsplit(url).hostname == "www.nature.com":
         article_type = soup.select_one(".c-article-identifiers__type")
         if article_type and article_type.get_text(strip=True).casefold() in {"article", "research article"}:
             event_text = f"期刊原文上线发表 {published_value}"
     return SourceDocument(url=url, title=title, description=description, text=text,
                           published=published_value, event_date_text=event_text,
-                          images=images)
+                          images=images, links=tuple(list(links.values())[:30]))
 
 
 def extract_publication_time(soup: BeautifulSoup, url: str) -> str:

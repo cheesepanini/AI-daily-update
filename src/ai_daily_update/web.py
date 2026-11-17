@@ -1465,7 +1465,8 @@ def create_app(root: Path | None = None) -> FastAPI:
             if action == "preview":
                 if not any(item["url"] == url for item in image_candidates(snapshot)):
                     raise ValueError("候选图已变化，请刷新卡片")
-                image_id = prepare_image(settings.root, url, source_page=card_source_page(snapshot))
+                candidate = next(item for item in image_candidates(snapshot) if item['url'] == url)
+                image_id = prepare_image(settings.root, url, source_page=candidate.get('source_page') or candidate.get('evidence_page') or card_source_page(snapshot))
             with exclusive_file_lock(path.with_name(f".{path.name}.lock"), blocking=True):
                 card = read_card(path)
                 metadata = card.metadata
@@ -1483,6 +1484,7 @@ def create_app(root: Path | None = None) -> FastAPI:
                     if len(images) >= 4 or not all(image_path(settings.root, image_id, size).is_file() for size in ("full", "thumb")):
                         raise ValueError("请先生成预览；每条消息最多发布四张图片")
                     record = {"id": image_id, "url": url, "page": card_source_page(metadata),
+                              "source_page": candidate.get('source_page') or candidate.get('evidence_page') or card_source_page(metadata),
                               "card_source": metadata.get("source_url"), "caption": candidate["caption"],
                               "credit": credit, "approved_at": now_iso(settings.timezone)}
                     if candidate.get("license") == "CC BY 4.0":
@@ -2583,9 +2585,15 @@ def card_list_item(path: Path, metadata: dict[str, Any], content: str) -> dict[s
     search_fields = {key: value.casefold() for key, value in search_fields.items()}
     search_fields["all"] = " ".join([*search_fields.values(), " ".join(metadata.get("topics", []) or [])]).casefold()
     return {
-        "display_version": 3,
+        "display_version": 4,
         **dates,
         "images": approved_images(metadata, str(metadata.get("id", path.stem))),
+        "supplementary_sources": [
+            {**item, 'url': safe_source_url(item.get('url'))}
+            for item in metadata.get('supplementary_sources', [])
+            if isinstance(item, dict) and safe_source_url(item.get('url'))
+        ] if metadata.get('supplementary_sources_page') == card_source_page(metadata)
+             and metadata.get('supplementary_sources_source') == metadata.get('source_url') else [],
         "path": path,
         "id": metadata.get("id", path.stem),
         "title": metadata.get("title_zh") or metadata.get("title_en") or path.stem,

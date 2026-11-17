@@ -100,6 +100,13 @@ def apply_source_evidence(metadata: dict, candidate: Candidate, document: Source
         metadata["image_candidates"] = list(document.images)
         metadata["image_candidates_page"] = candidate.parent_url or candidate.url
         metadata["image_candidates_source"] = candidate.url
+    if document.supplementary_sources:
+        metadata["supplementary_sources"] = [
+            {key: value for key, value in source.items() if key != "excerpt"}
+            for source in document.supplementary_sources
+        ]
+        metadata["supplementary_sources_page"] = candidate.parent_url or candidate.url
+        metadata["supplementary_sources_source"] = candidate.url
 
 
 def source_news_dates(document: SourceDocument, digest_item: bool = False) -> dict[str, str]:

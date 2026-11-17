@@ -5,7 +5,7 @@
     <a href="{{ image.card_url or image.full_url }}"><img src="{{ image.full_url if images | length == 1 else image.thumb_url if image.card_url else image.full_url }}" alt="{{ image.caption }}" loading="lazy" decoding="async"></a>
     <figcaption>
       {% if image.card_url %}<a href="{{ image.card_url }}">{{ image.card_title }}</a> · {% endif %}
-      <a href="{{ image.page }}" rel="noopener noreferrer">图源：{{ image.credit }}</a>
+      <a href="{{ image.source_page or image.page }}" rel="noopener noreferrer">图源：{{ image.credit }}</a>
       {% if image.license == 'CC BY 4.0' %} · <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener noreferrer">CC BY 4.0</a> · 本站压缩{% endif %}
     </figcaption>
   </figure>

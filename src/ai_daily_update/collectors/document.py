@@ -14,6 +14,8 @@ class SourceDocument:
     images: tuple[dict[str, str], ...] = ()
     image_license: str = ""
     publication_basis: str = ""
+    links: tuple[dict[str, str], ...] = ()
+    supplementary_sources: tuple[dict[str, str], ...] = ()
 
 
 def normalize_text(value: str) -> str:

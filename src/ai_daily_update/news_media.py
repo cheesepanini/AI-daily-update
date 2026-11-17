@@ -27,7 +27,7 @@ from ai_daily_update.collectors.document import SourceDocument, normalize_text
 from ai_daily_update.processors.card_builder import source_news_dates
 from ai_daily_update.processors.digest import split_digest_document
 from ai_daily_update.storage.markdown import read_card, write_card
-from ai_daily_update.utils.dates import normalize_iso_date, public_date_fields, written_dates
+from ai_daily_update.utils.dates import normalize_iso_date, now_iso, public_date_fields, written_dates
 from ai_daily_update.utils.lock import exclusive_file_lock
 
 
@@ -74,7 +74,8 @@ def _wait_arxiv_slot(host: str) -> None:
         slot.write_text(str(time.time()))
 
 
-def download_public(url: str, limit: int, expected_type: str | tuple[str, ...], *, referer: str = "") -> tuple[str, bytes]:
+def download_public(url: str, limit: int, expected_type: str | tuple[str, ...], *, referer: str = "",
+                    allow_redirects: bool = True) -> tuple[str, bytes]:
     """Fetch a bounded public resource, pinning the checked IP on each hop."""
     deadline = time.monotonic() + 20
     original_host = urlsplit(url).hostname if referer else ""
@@ -115,6 +116,8 @@ def download_public(url: str, limit: int, expected_type: str | tuple[str, ...], 
                                     timeout=urllib3.Timeout(connect=min(4, remaining), read=min(4, remaining)),
                                     redirect=False, retries=False, preload_content=False)
             if response.status in {301, 302, 303, 307, 308} and response.headers.get("Location"):
+                if not allow_redirects:
+                    raise ValueError("来源跳转，未取得所需正文")
                 url = urljoin(url, response.headers["Location"])
                 response.close()
                 continue
@@ -371,6 +374,10 @@ def save_news_evidence(path: Path, page: str, source: str | None, document: Sour
             existing[item["url"]] = {**item, **existing.get(item["url"], {})}
         updates = dict(image_candidates_page=page, image_candidates_source=source,
                        source_evidence_scan=SOURCE_SCAN_VERSION, image_candidates=list(existing.values()))
+        if document.supplementary_sources:
+            updates.update(supplementary_sources=[{k: v for k, v in item.items() if k != 'excerpt'}
+                                                  for item in document.supplementary_sources],
+                           supplementary_sources_page=page, supplementary_sources_source=source)
         moved_date = ""
         if backfill:
             previous = public_date_fields(metadata)["display_date"]
@@ -384,6 +391,50 @@ def save_news_evidence(path: Path, page: str, source: str | None, document: Sour
         if any(metadata.get(key) != value for key, value in updates.items()):
             write_card(path, {**metadata, **updates}, card.content)
     return len(updates["image_candidates"]), moved_date
+
+
+def publish_verified_images(root: Path, metadata: dict, document: SourceDocument, *, maximum: int = 2) -> int:
+    """Publish fetched event images with attribution; keep the card's source binding."""
+    existing = approved_images(metadata, str(metadata.get('id', '')))
+    records = [{key: value for key, value in image.items() if key not in {'full_url', 'thumb_url'}}
+               for image in existing]
+    ids = {image['id'] for image in records}
+    attempts = added = 0
+    for image in document.images:
+        if len(records) >= min(4, maximum) or attempts >= 6:
+            break
+        if image.get('event_match') not in {'original-article', 'exact-paper', 'same-event'}:
+            continue
+        page = image.get('source_page') or document.url
+        if urlsplit(page).scheme not in {'http', 'https'}:
+            continue
+        attempts += 1
+        try:
+            image_id = image.get('preview', '')
+            if not re.fullmatch(r'[a-f0-9]{64}', image_id) or not all(
+                image_path(root, image_id, size).is_file() for size in ('full', 'thumb')
+            ):
+                image_id = prepare_image(root, image['url'], source_page=page)
+        except (OSError, ValueError, urllib3.exceptions.HTTPError, Image.DecompressionBombError):
+            continue
+        if image_id in ids:
+            continue
+        caption = str(image.get('caption') or '')[:160]
+        if caption in {'', '报道封面', '报道正文图'}:
+            caption = f"{metadata.get('title_zh') or metadata.get('title_en') or document.title} · 报道配图"[:160]
+        record = {'id': image_id, 'url': image['url'], 'page': card_source_page(metadata),
+                  'card_source': metadata.get('source_url'), 'source_page': page,
+                  'caption': caption, 'credit': image.get('credit') or urlsplit(page).hostname,
+                  'approved_at': now_iso('Asia/Shanghai'), 'approved_by': 'auto:event-evidence',
+                  'event_match': image['event_match']}
+        if image.get('license'):
+            record['license'] = image['license']
+        records.append(record)
+        ids.add(image_id)
+        added += 1
+    if added:
+        metadata['approved_images'] = records
+    return added
 
 
 def preview_licensed_figures(root: Path, document: SourceDocument) -> SourceDocument:

@@ -49,6 +49,13 @@
   </form>
 </section>
 
+{% if card.supplementary_sources %}
+<section class="panel">
+  <h2>补充报道与资料</h2>
+  <ul>{% for source in card.supplementary_sources %}<li><a href="{{ source.url }}" rel="noopener noreferrer">{{ source.title }}</a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
 {% if event_sources %}
 <section class="panel">
   <h2>同一事件的其他来源</h2>
