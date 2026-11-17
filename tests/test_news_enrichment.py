@@ -29,6 +29,10 @@ def test_same_event_requires_actual_body_quote_and_specific_shared_identity():
     assert enrichment.verify_event_sources(llm, original, original.title, [other]) == []
     choices[0] = {'index': True, 'anchor': 'Orion 3', 'quote': other.text}
     assert enrichment.verify_event_sources(llm, original, original.title, [other]) == []
+    original = SourceDocument(original.url, 'Release of Qwen4-Max', '', 'Qwen4-Max improves coding.')
+    other = SourceDocument(other.url, 'Qwen4-Max', '', 'Qwen4-Max completes coding tasks at a lower cost.')
+    choices[0] = {'index': 0, 'anchor': 'Qwen4-Max is cheaper for coding tasks', 'quote': other.text}
+    assert enrichment.verify_event_sources(llm, original, original.title, [other])[0][1]['anchor'] == 'Qwen4-Max'
 
 
 def test_cross_source_material_enters_generation_and_preserves_image_origin(monkeypatch, tmp_path):
