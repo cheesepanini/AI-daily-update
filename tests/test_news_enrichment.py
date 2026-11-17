@@ -33,6 +33,11 @@ def test_same_event_requires_actual_body_quote_and_specific_shared_identity():
     other = SourceDocument(other.url, 'Qwen4-Max', '', 'Qwen4-Max completes coding tasks at a lower cost.')
     choices[0] = {'index': 0, 'anchor': 'Qwen4-Max is cheaper for coding tasks', 'quote': other.text}
     assert enrichment.verify_event_sources(llm, original, original.title, [other])[0][1]['anchor'] == 'Qwen4-Max'
+    other = SourceDocument(other.url, other.title, '', 'Qwen4-Max\n完成任务的平均费用\n降低了\n58%。' * 15)
+    choices[0] = {'index': 0, 'anchor': 'Qwen4-Max', 'quote': other.text.replace('\n', '')}
+    assert len(enrichment.verify_event_sources(llm, original, original.title, [other])[0][1]['quote']) == 220
+    choices[0]['quote'] += '这一句并不存在于原文。'
+    assert enrichment.verify_event_sources(llm, original, original.title, [other]) == []
 
 
 def test_cross_source_material_enters_generation_and_preserves_image_origin(monkeypatch, tmp_path):

@@ -70,7 +70,7 @@ def search_event_pages(title: str) -> list[dict[str, str]]:
 
 
 def _compact(value: str) -> str:
-    return re.sub(r'\s+', ' ', value).strip().casefold()
+    return re.sub(r'\s+', '', value).casefold()
 
 
 def verify_event_sources(llm, original: SourceDocument, title: str,
@@ -85,7 +85,7 @@ def verify_event_sources(llm, original: SourceDocument, title: str,
         '必须核对主体、产品/模型版本、行为和时间；同公司、同领域、旧版本、背景报道均不算。'
         '只接受正文实际包含本条事件的来源，最多3条。为每条给出index、anchor（双方原文共同出现的独特名称，至少4字符，'
         '不可只用人工智能、模型、公司名等泛词，也不要把名称改写成结论句，例如只写Qwen4-Max或MLPerf Endpoints）、'
-        'quote（候选正文中描述本次事件的连续原句，12至220字符）。'
+        'quote（候选正文中描述本次事件的连续原句，优先只摘一小句，不要复制整段）。'
         '不得编造URL或引句。返回JSON数组；不确定就返回[]。', material)
     verified = {}
     for choice in choices:
@@ -102,7 +102,7 @@ def verify_event_sources(llm, original: SourceDocument, title: str,
             anchor = next((name for name in re.findall(r'\b[A-Za-z][A-Za-z0-9]*(?:[-.][A-Za-z0-9]+)+\b', original_text)
                            if any(char.isdigit() for char in name)
                            and _compact(name) in _compact(quote_text)), '')
-        if (not 4 <= len(anchor) <= 120 or not 12 <= len(quote_text) <= 220
+        if (not 4 <= len(anchor) <= 120 or not 12 <= len(quote_text) <= 1800
                 or _compact(anchor) in {'openai', 'nvidia', 'google', 'microsoft', 'deepseek',
                                        'chatgpt', 'gemini', 'claude', 'llama', 'artificial intelligence',
                                        '人工智能', '大语言模型', '大模型', '英伟达', '谷歌', '微软', '机器学习'}
@@ -110,7 +110,7 @@ def verify_event_sources(llm, original: SourceDocument, title: str,
                 or _compact(anchor) not in _compact(f'{doc.title}\n{doc.text[:6500]}')
                 or _compact(quote_text) not in _compact(doc.text[:6500])):
             continue
-        verified[index] = (doc, {'url': doc.url, 'title': doc.title, 'quote': quote_text,
+        verified[index] = (doc, {'url': doc.url, 'title': doc.title, 'quote': quote_text[:220],
                                  'anchor': anchor, 'match': 'same-event', 'excerpt': doc.text[:4500]})
     return list(verified.values())[:3]
 
