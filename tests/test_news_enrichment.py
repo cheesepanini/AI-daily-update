@@ -121,3 +121,25 @@ def test_backfill_preserves_body_dates_review_and_creates_backup(tmp_path, monke
     assert current.metadata['news_dates'] == metadata['news_dates']
     assert current.metadata['reviewed_by'] == 'teacher' and current.metadata['review_status'] == 'accepted'
     assert read_card(tmp_path / 'data/backups/news-media-enrichment/notes/cards/test.md').metadata == metadata
+
+
+def test_publishing_skips_resized_copies_of_the_same_figure_and_cleans_placeholder_captions(tmp_path, monkeypatch):
+    page = 'https://publisher.example/story'
+    urls = [f'https://publisher.example/{name}.png' for name in ('figure-small', 'figure-large', 'demo')]
+    document = SourceDocument(page, 'Orion 3', '', '', images=tuple(
+        {'url': url, 'caption': 'Figure 1. Performance' if index < 2 else '在这里插入图片描述',
+         'source_page': page, 'event_match': 'original-article'} for index, url in enumerate(urls)
+    ))
+    requested = []
+
+    def prepare(root, url, **kwargs):
+        requested.append(url)
+        buffer = BytesIO()
+        Image.new('RGB', (800, 500), ('red', 'blue', 'green')[urls.index(url)]).save(buffer, format='PNG')
+        return news_media.store_news_image(root, buffer.getvalue())
+
+    monkeypatch.setattr(news_media, 'prepare_image', prepare)
+    metadata = {'id': 'demo', 'source_url': page, 'title_zh': 'Orion 3'}
+    assert news_media.publish_verified_images(tmp_path, metadata, document) == 2
+    assert requested == [urls[0], urls[2]]
+    assert metadata['approved_images'][1]['caption'] == 'Orion 3 · 报道配图'

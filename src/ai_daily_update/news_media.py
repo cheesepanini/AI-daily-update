@@ -35,6 +35,7 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024
 SOURCE_SCAN_VERSION = 1
 CC_BY = "https://creativecommons.org/licenses/by/4.0/"
 _PLACEHOLDER_IDS = {"281713e7598096dcc2076a84648040029eae4c4dcc66f68045a061441f1cb77a"}
+_GENERIC_IMAGE_CAPTIONS = {'', '报道封面', '报道正文图', '在这里插入图片描述'}
 _SHORT_EVENT_DATE = re.compile(
     r"\d{1,2}\s*月\s*\d{1,2}\s*日|\b(?:January|February|March|April|May|June|July|August|"
     r"September|October|November|December)\s+\d{1,2}(?!\d)", re.I,
@@ -260,7 +261,7 @@ def licensed_figures(page: str, html: bytes, arxiv_id: str = "") -> tuple[dict[s
 def prioritize_card_images(llm, document: SourceDocument, title: str) -> SourceDocument:
     """Rank images actually found on the source, using their captions."""
     images = document.images
-    captions = {item["caption"] for item in images if item["caption"] not in {"报道封面", "报道正文图"}}
+    captions = {item["caption"] for item in images if item["caption"] not in _GENERIC_IMAGE_CAPTIONS}
     if len(captions) < 2 or not llm.available:
         return document
     items = [{"index": i, "caption": item["caption"]} for i, item in enumerate(images)]
@@ -409,6 +410,11 @@ def publish_verified_images(root: Path, metadata: dict, document: SourceDocument
         page = image.get('source_page') or document.url
         if urlsplit(page).scheme not in {'http', 'https'}:
             continue
+        caption = str(image.get('caption') or '').strip()[:160]
+        if caption not in _GENERIC_IMAGE_CAPTIONS and any(
+            record['caption'] == caption and record.get('source_page', record['page']) == page for record in records
+        ):
+            continue
         attempts += 1
         try:
             image_id = image.get('preview', '')
@@ -420,8 +426,7 @@ def publish_verified_images(root: Path, metadata: dict, document: SourceDocument
             continue
         if image_id in ids:
             continue
-        caption = str(image.get('caption') or '')[:160]
-        if caption in {'', '报道封面', '报道正文图'}:
+        if caption in _GENERIC_IMAGE_CAPTIONS:
             caption = f"{metadata.get('title_zh') or metadata.get('title_en') or document.title} · 报道配图"[:160]
         record = {'id': image_id, 'url': image['url'], 'page': card_source_page(metadata),
                   'card_source': metadata.get('source_url'), 'source_page': page,
