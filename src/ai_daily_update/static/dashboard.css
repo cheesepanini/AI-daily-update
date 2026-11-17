@@ -1562,7 +1562,7 @@ hr {
   .public-card.has-thumbnail { grid-template-columns: minmax(0, 1fr) 86px; gap: 10px; }
   .public-card.has-thumbnail .public-card-date { grid-column: 1 / -1; }
   .public-card-thumbnail img { max-height: 112px; }
-  .news-image-group:not(.single) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .news-image-group:not(.single) { grid-template-columns: minmax(0, 1fr); }
 }
 
 .public-card-date {
