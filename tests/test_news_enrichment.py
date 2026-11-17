@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -143,3 +144,22 @@ def test_publishing_skips_resized_copies_of_the_same_figure_and_cleans_placehold
     assert news_media.publish_verified_images(tmp_path, metadata, document) == 2
     assert requested == [urls[0], urls[2]]
     assert metadata['approved_images'][1]['caption'] == 'Orion 3 · 报道配图'
+
+
+def test_daily_retry_waits_until_next_day_skips_completed_attempts_and_has_a_small_run_budget(tmp_path):
+    root = tmp_path / 'notes'
+    base = {'source_url': 'https://publisher.example/news', 'review_status': 'needs-review'}
+    for name, extra in {
+        'fresh': {'collected_date': '2026-11-18'},
+        'old': {'collected_date': '2026-11-15'},
+        'retried': {'collected_date': '2026-11-17', 'media_enrichment_at': '2026-11-18T06:00:00+08:00'},
+        'rejected': {'collected_date': '2026-11-17', 'review_status': 'rejected'},
+        **{f'waiting-{n}': {'collected_date': '2026-11-17'} for n in range(6)},
+    }.items():
+        write_card(root / 'cards' / f'{name}.md', {**base, 'id': name, **extra}, 'Article')
+    paths = enrichment.recent_image_retry_paths(root, date(2026, 11, 18))
+    assert len(paths) == 5 and all(path.stem.startswith('waiting-') for path in paths)
+    for path in paths:
+        card = read_card(path)
+        write_card(path, {**card.metadata, 'media_enrichment_at': '2026-11-18T07:00:00+08:00'}, card.content)
+    assert len(enrichment.recent_image_retry_paths(root, date(2026, 11, 18))) == 1

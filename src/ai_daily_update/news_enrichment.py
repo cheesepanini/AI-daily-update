@@ -5,6 +5,7 @@ import json
 import re
 from functools import lru_cache
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -20,7 +21,7 @@ from ai_daily_update.news_media import (
     prioritize_card_images, publish_verified_images,
 )
 from ai_daily_update.processors.digest import split_digest_document
-from ai_daily_update.storage.markdown import read_card, write_card
+from ai_daily_update.storage.markdown import iter_cards, read_card, write_card
 from ai_daily_update.utils.dates import now_iso
 from ai_daily_update.utils.lock import exclusive_file_lock
 
@@ -211,6 +212,22 @@ def _backfill_original(page: str) -> SourceDocument | None:
         return fetch_news_evidence(page)
     except FETCH_ERRORS:
         return None
+
+
+def recent_image_retry_paths(markdown_root: Path, day: date) -> list[Path]:
+    """Return up to five recent missing-image cards not attempted today."""
+    entries = []
+    for path in iter_cards(markdown_root):
+        metadata = read_card(path).metadata
+        collected = str(metadata.get('collected_date') or metadata.get('created_at') or metadata.get('date') or '')[:10]
+        if (metadata.get('review_status') not in {'accepted', 'needs-review', 'later'}
+                or not (day - timedelta(days=2)).isoformat() <= collected < day.isoformat()
+                or str(metadata.get('media_enrichment_at') or '')[:10] == day.isoformat()
+                or approved_images(metadata, str(metadata.get('id', '')))):
+            continue
+        entries.append((bool(image_candidates(metadata)), collected, path))
+    entries.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    return [entry[2] for entry in entries[:5]]
 
 
 def enrich_saved_card(root: Path, path: Path, llm) -> dict:

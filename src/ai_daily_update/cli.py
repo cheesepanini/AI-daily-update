@@ -23,7 +23,7 @@ from ai_daily_update.llm.client import OpenAIClient
 from ai_daily_update.news_media import (
     SOURCE_SCAN_VERSION, fetch_news_evidence, infer_source_events, preview_licensed_figures, publish_verified_images,
 )
-from ai_daily_update.news_enrichment import ENRICHMENT_VERSION, enrich_news_sources, enrich_saved_card
+from ai_daily_update.news_enrichment import ENRICHMENT_VERSION, enrich_news_sources, enrich_saved_card, recent_image_retry_paths
 from ai_daily_update.preference.features import extract_preference_features
 from ai_daily_update.processors.card_builder import (
     apply_content_date,
@@ -70,7 +70,7 @@ from ai_daily_update.review.workflow import needs_review_cards, set_review_statu
 from ai_daily_update.source_proposals import generate_source_proposals
 from ai_daily_update.storage.indexer import rebuild_index
 from ai_daily_update.storage.markdown import iter_cards, read_card, write_card
-from ai_daily_update.utils.dates import public_date_fields, today_in_timezone
+from ai_daily_update.utils.dates import now_iso, public_date_fields, today_in_timezone
 from ai_daily_update.utils.paths import ensure_directories
 
 
@@ -520,6 +520,7 @@ def _run_daily_pipeline_locked(
             metadata["title_zh"] = infer_title_zh(content, metadata.get("title_zh", ""))
             publish_verified_images(settings.root, metadata, source_document)
             metadata['media_enrichment_version'] = ENRICHMENT_VERSION
+            metadata['media_enrichment_at'] = now_iso(settings.timezone)
             if content_from_llm and llm.available:
                 metadata.update(score_card_quality_with_llm(metadata, content, llm))
                 concept_ids = choose_news_concepts_with_llm(learning_catalog, metadata, content, llm)
@@ -541,6 +542,13 @@ def _run_daily_pipeline_locked(
             skipped += 1
             emit_progress(progress, f"第 {index}/{total_to_generate} 张生成失败，继续处理下一条")
             continue
+    for retry_path in recent_image_retry_paths(settings.markdown_root, run_day):
+        emit_progress(progress, f'正在补查最近缺图的消息：{retry_path.stem[:60]}')
+        try:
+            result = enrich_saved_card(settings.root, retry_path, llm)
+            typer.echo(f'配图补查 {result}')
+        except Exception as exc:
+            typer.echo(f'warning: image retry failed for {retry_path.stem}: {exc}', err=True)
     emit_progress(progress, "正在重建索引")
     indexed, warnings = rebuild_index(settings.markdown_root, settings.sqlite_path)
     emit_progress(progress, "正在自动审核超过 1 天未处理的卡片")
