@@ -228,7 +228,7 @@ def enrich_saved_card(root: Path, path: Path, llm) -> dict:
     document = enrich_news_sources(llm, document, title, summary=snapshot.content[:2500],
                                    digest_index=int(metadata.get('digest_item_index') or 0))
     working = dict(metadata)
-    added = publish_verified_images(root, working, document)
+    added = publish_verified_images(root, working, document, maximum=1 if extract_arxiv_id(page) else 2)
     old_ids = {image['id'] for image in approved_images(metadata, str(metadata.get('id', '')))}
     new_images = [image for image in working.get('approved_images', []) if image['id'] not in old_ids]
     with exclusive_file_lock(path.with_name(f'.{path.name}.lock'), blocking=True):
