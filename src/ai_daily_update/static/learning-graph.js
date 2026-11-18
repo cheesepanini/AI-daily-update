@@ -27,7 +27,7 @@
     link.style.left = `${x}px`;
     link.style.top = `${y}px`;
     link.style.setProperty('--node-size', `${radius * 2}px`);
-    if (x > width - 250) link.classList.add('graph-label-left');
+    link.classList.toggle('graph-label-left', x > width - 250);
   }
   for (const [index, chapter] of chapters.entries()) {
     const angle = index * (2 * Math.PI / chapters.length) - Math.PI / 2;
@@ -55,6 +55,40 @@
       }
     }
   }
+  const particles = [...positions].map(([id, point]) => ({id, point, fixed: links.get(id).dataset.kind === 'chapter'}));
+  // ponytail: bounded O(n²) layout at load; spatial bins if the catalog grows.
+  for (let pass = 0; pass < 160; pass++) {
+    let overlap = 0;
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const a = particles[i], b = particles[j];
+        if (a.fixed && b.fixed) continue;
+        let dx = b.point.x - a.point.x, dy = b.point.y - a.point.y;
+        const minimum = Math.max(42, a.point.radius + b.point.radius + 18);
+        const squaredDistance = dx * dx + dy * dy;
+        if (squaredDistance >= minimum * minimum) continue;
+        let distance = Math.sqrt(squaredDistance);
+        if (!distance) { dx = Math.cos(j * goldenAngle); dy = Math.sin(j * goldenAngle); distance = 1; }
+        const push = (minimum - distance) / distance / (a.fixed || b.fixed ? 1 : 2);
+        if (!a.fixed) { a.point.x -= dx * push; a.point.y -= dy * push; }
+        if (!b.fixed) { b.point.x += dx * push; b.point.y += dy * push; }
+        overlap = Math.max(overlap, minimum - distance);
+      }
+    }
+    for (const {point, fixed} of particles) {
+      if (fixed) continue;
+      point.x = Math.max(point.radius + 32, Math.min(width - point.radius - 32, point.x));
+      point.y = Math.max(point.radius + 32, Math.min(height - point.radius - 32, point.y));
+    }
+    if (overlap < .1) break;
+  }
+  for (const {id, point} of particles) place(id, point.x, point.y, point.radius);
+  const contentBounds = {
+    left: Math.min(...[...positions.values()].map(point => point.x - point.radius)),
+    right: Math.max(...[...positions.values()].map(point => point.x + point.radius)),
+    top: Math.min(...[...positions.values()].map(point => point.y - point.radius)),
+    bottom: Math.max(...[...positions.values()].map(point => point.y + point.radius)),
+  };
   let zoom = 1;
   let pathIds = new Set();
   let camera = {x: 0, y: 0, zoom: 1};
@@ -77,17 +111,41 @@
     if (renderedZoom !== camera.zoom) {
       renderedZoom = camera.zoom;
       stage.style.setProperty('--graph-label-size', `${Math.max(15, 10 / camera.zoom)}px`);
-      stage.style.setProperty('--graph-hit-size', `${24 / camera.zoom}px`);
+      stage.style.setProperty('--graph-hit-size', `${Math.min(36, 24 / camera.zoom)}px`);
       stage.classList.toggle('graph-compact', camera.zoom < .95);
     }
     positionPreview();
     animation = moving ? requestAnimationFrame(renderCamera) : null;
   }
 
+  function fitZoom() {
+    return Math.min((viewport.clientWidth - 48) / width, (viewport.clientHeight - 80) / height, 1);
+  }
+
   function moveCamera(next, immediate = false) {
+    const inset = Math.min(72, viewport.clientWidth / 4, viewport.clientHeight / 4);
+    next = {...next, zoom: Math.max(fitZoom(), Math.min(3, next.zoom))};
+    function bound(value, start, end, size) {
+      const overlap = .8 * Math.min(size, (end - start) * next.zoom);
+      return Math.max(overlap - end * next.zoom, Math.min(size - overlap - start * next.zoom, value));
+    }
+    next.x = bound(next.x, contentBounds.left, contentBounds.right, viewport.clientWidth);
+    next.y = bound(next.y, contentBounds.top, contentBounds.bottom, viewport.clientHeight);
+    const points = [...positions.values()].map(point => ({x: next.x + point.x * next.zoom, y: next.y + point.y * next.zoom}));
+    const inside = point => point.x >= inset && point.x <= viewport.clientWidth - inset &&
+                            point.y >= inset && point.y <= viewport.clientHeight - inset;
+    if (!points.some(inside)) {
+      const offset = point => ({x: Math.max(inset, Math.min(viewport.clientWidth - inset, point.x)) - point.x,
+                               y: Math.max(inset, Math.min(viewport.clientHeight - inset, point.y)) - point.y});
+      const closest = points.map(offset).reduce((best, point) => Math.hypot(point.x, point.y) < Math.hypot(best.x, best.y) ? point : best);
+      next.x += closest.x;
+      next.y += closest.y;
+    }
     target = next;
     zoom = target.zoom;
     if (immediate || reducedMotion.matches) camera = {...target};
+    byId('graph-zoom-out').disabled = zoom <= fitZoom() + .0001;
+    byId('graph-zoom-in').disabled = zoom >= 3;
     byId('graph-zoom-value').value = `${Math.round(zoom * 100)}%`;
     status.textContent = `缩放 ${Math.round(zoom * 100)}%`;
     if (!animation) {
@@ -101,7 +159,7 @@
   }
 
   function setZoom(value, anchor = {x: viewport.clientWidth / 2, y: viewport.clientHeight / 2}) {
-    const nextZoom = Math.max(.15, Math.min(3, value));
+    const nextZoom = Math.max(fitZoom(), Math.min(3, value));
     const ratio = nextZoom / zoom;
     moveCamera({x: anchor.x - (anchor.x - target.x) * ratio,
                 y: anchor.y - (anchor.y - target.y) * ratio, zoom: nextZoom});
@@ -109,7 +167,7 @@
 
   function fit() {
     hidePreview();
-    setZoom(Math.min((viewport.clientWidth - 48) / width, (viewport.clientHeight - 80) / height, 1));
+    setZoom(fitZoom());
     centerOn(width / 2, height / 2);
   }
 
@@ -315,7 +373,7 @@
     viewport.setPointerCapture(event.pointerId);
     suppressClickUntil = performance.now() + 400;
     const scale = gesture.distance > 0 ? point.distance / gesture.distance : 1;
-    const nextZoom = Math.max(.15, Math.min(3, gesture.camera.zoom * scale));
+    const nextZoom = Math.max(fitZoom(), Math.min(3, gesture.camera.zoom * scale));
     const ratio = nextZoom / gesture.camera.zoom;
     moveCamera({x: point.x - (gesture.x - gesture.camera.x) * ratio,
                 y: point.y - (gesture.y - gesture.camera.y) * ratio, zoom: nextZoom}, true);
